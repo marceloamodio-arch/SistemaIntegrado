@@ -252,7 +252,13 @@ def mostrar_login():
                 **¿Olvidaste tu contraseña?**  
                 Contacta al administrador del sistema para restablecerla.
             """)
-    
+from utils.alertas import mostrar_alerta_ultimos_datos
+
+st.markdown("---")
+mostrar_alerta_ultimos_datos()
+
+st.markdown("---")
+st.caption("**CALCULADORA IBM
     # Footer
     st.markdown("""
         <div class='footer'>
