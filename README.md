@@ -1,2 +1,2 @@
-# SistemaIntegrado
-Sistema Integrado de Calculos y Herramientas TT2
+# calculadoraLRT
+Calculadora riesgos laborales
