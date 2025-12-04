@@ -211,16 +211,12 @@ def mostrar_login():
                     st.error("⚠️ Por favor completa todos los campos")
                 else:
                     # Autenticar usuario
-                    autenticado, usuario_data = auth.validar_credenciales(username, password)
+                    autenticado, usuario_data = auth.autenticar(username, password)
                     
                     if autenticado:
                         # Guardar usuario en sesión
                         st.session_state.autenticado = True
                         st.session_state.usuario = usuario_data
-                        
-                        # Verificar si es primer login
-                        if usuario_data.get('primer_login', 0) == 1:
-                            st.session_state.mostrar_cambio_password = True
                         
                         # Crear token de sesión persistente
                         session_mgr = SimpleSessionManager()
@@ -252,11 +248,7 @@ def mostrar_login():
                 **¿Olvidaste tu contraseña?**  
                 Contacta al administrador del sistema para restablecerla.
             """)
-# Footer con alerta de datos (solo si está autenticado)
-    if st.session_state.autenticado:
-        from utils.alertas import mostrar_alerta_ultimos_datos
-        st.markdown("---")
-        mostrar_alerta_ultimos_datos()
+    
     # Footer
     st.markdown("""
         <div class='footer'>
@@ -299,7 +291,7 @@ def ejecutar_aplicacion(app_key):
     app_info = APLICACIONES[app_key]
     
     # Verificar permisos
-    if app_info['nivel_requerido'] == 'admin' and st.session_state.usuario['nivel'] not in ['admin', 'superadmin']:
+    if app_info['nivel_requerido'] == 'admin' and st.session_state.usuario['nivel'] != 'admin':
         st.error("🚫 No tienes permisos para acceder a esta aplicación. Solo administradores.")
         if st.button("⬅️ Volver al menú"):
             st.session_state.app_actual = None
@@ -373,7 +365,7 @@ def mostrar_menu_principal():
     # Filtrar aplicaciones según permisos
     apps_disponibles = {
         k: v for k, v in APLICACIONES.items()
-        if v['nivel_requerido'] == 'normal' or nivel_usuario in ['admin', 'superadmin']
+        if v['nivel_requerido'] == 'normal' or nivel_usuario == 'admin'
     }
     
     st.markdown("### 🛠️ Aplicaciones Disponibles")
@@ -404,11 +396,13 @@ def mostrar_menu_principal():
                             st.session_state.app_actual = app_key
                             st.rerun()
     
-    # Mostrar últimos datos disponibles usando función centralizada
-    from utils.info_datasets import mostrar_ultimos_datos_completo
-    mostrar_ultimos_datos_completo()
+    # Mostrar últimos datos disponibles - ANTES DEL FOOTER
+    st.markdown("---")
+    from utils.alertas import mostrar_alerta_ultimos_datos
+    mostrar_alerta_ultimos_datos()
     
     # Footer
+    st.markdown("---")
     st.markdown("""
         <div class='footer'>
             <p>
@@ -470,43 +464,11 @@ def main():
     if not st.session_state.autenticado:
         mostrar_login()
     else:
-        # Verificar si debe cambiar contraseña (primer login)
-        if st.session_state.get('mostrar_cambio_password', False):
-            st.warning("⚠️ **Primer inicio de sesión detectado**")
-            st.info("Por seguridad, debes cambiar tu contraseña antes de continuar.")
-            
-            with st.form("form_cambio_password_obligatorio"):
-                nueva_pass = st.text_input("Nueva contraseña (mínimo 6 caracteres)", type="password")
-                confirmar_pass = st.text_input("Confirmar nueva contraseña", type="password")
-                
-                if st.form_submit_button("🔐 Cambiar Contraseña", use_container_width=True, type="primary"):
-                    if not nueva_pass or not confirmar_pass:
-                        st.error("❌ Debes completar ambos campos")
-                    elif nueva_pass != confirmar_pass:
-                        st.error("❌ Las contraseñas no coinciden")
-                    elif len(nueva_pass) < 6:
-                        st.error("❌ La contraseña debe tener al menos 6 caracteres")
-                    else:
-                        auth = AuthSystem()
-                        exito, mensaje = auth.cambiar_password(
-                            username=st.session_state.usuario['username'],
-                            nueva_password=nueva_pass,
-                            cambiado_por=st.session_state.usuario['username']
-                        )
-                        
-                        if exito:
-                            st.success("✅ Contraseña cambiada exitosamente")
-                            st.session_state.mostrar_cambio_password = False
-                            st.session_state.usuario['primer_login'] = 0
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {mensaje}")
+        # Usuario autenticado - mostrar sistema
+        if st.session_state.app_actual:
+            ejecutar_aplicacion(st.session_state.app_actual)
         else:
-            # Usuario autenticado - mostrar sistema
-            if st.session_state.app_actual:
-                ejecutar_aplicacion(st.session_state.app_actual)
-            else:
-                mostrar_menu_principal()
+            mostrar_menu_principal()
 
 if __name__ == "__main__":
     main()
