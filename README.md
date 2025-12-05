@@ -1,1 +1,2 @@
-Sistema Integrado de Calculos y Herramientas
+# calculadoraLRT
+Calculadora riesgos laborales
