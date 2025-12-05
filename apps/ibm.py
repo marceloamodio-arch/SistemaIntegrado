@@ -21,83 +21,10 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 from utils.data_loader import get_ultimo_dato
 from utils.navegacion import mostrar_sidebar_navegacion
 from utils.info_datasets import mostrar_ultimos_datos
+from utils.formatters import numero_a_letras
 
 # Sidebar de navegacion
 mostrar_sidebar_navegacion('ibm')
-
-def numero_a_letras(numero):
-    """Convierte un número a su representación en letras (pesos argentinos)"""
-    unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE']
-    decenas = ['', '', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA']
-    especiales = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE']
-    centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS']
-    
-    def convertir_grupo(n):
-        if n == 0:
-            return ''
-        elif n == 100:
-            return 'CIEN'
-        elif n < 10:
-            return unidades[n]
-        elif n < 20:
-            return especiales[n - 10]
-        elif n < 100:
-            dec = n // 10
-            uni = n % 10
-            if uni == 0:
-                return decenas[dec]
-            else:
-                return decenas[dec] + (' Y ' if dec > 2 else 'I') + unidades[uni]
-        else:
-            cen = n // 100
-            resto = n % 100
-            if resto == 0:
-                return centenas[cen]
-            else:
-                return centenas[cen] + ' ' + convertir_grupo(resto)
-    
-    if numero == 0:
-        return 'CERO PESOS'
-    
-    entero = int(numero)
-    decimal = int(round((numero - entero) * 100))
-    
-    if entero >= 1000000000:
-        miles_millon = entero // 1000000000
-        resto = entero % 1000000000
-        texto = convertir_grupo(miles_millon) + ' MIL'
-        if resto >= 1000000:
-            millones = resto // 1000000
-            resto = resto % 1000000
-            texto += ' ' + (convertir_grupo(millones) if millones > 1 else 'UN') + ' MILLÓN' + ('ES' if millones > 1 else '')
-        if resto > 0:
-            if resto >= 1000:
-                miles = resto // 1000
-                resto = resto % 1000
-                texto += ' ' + convertir_grupo(miles) + ' MIL'
-            if resto > 0:
-                texto += ' ' + convertir_grupo(resto)
-    elif entero >= 1000000:
-        millones = entero // 1000000
-        resto = entero % 1000000
-        texto = (convertir_grupo(millones) if millones > 1 else 'UN') + ' MILLÓN' + ('ES' if millones > 1 else '')
-        if resto > 0:
-            if resto >= 1000:
-                miles = resto // 1000
-                resto = resto % 1000
-                texto += ' ' + convertir_grupo(miles) + ' MIL'
-            if resto > 0:
-                texto += ' ' + convertir_grupo(resto)
-    elif entero >= 1000:
-        miles = entero // 1000
-        resto = entero % 1000
-        texto = convertir_grupo(miles) + ' MIL'
-        if resto > 0:
-            texto += ' ' + convertir_grupo(resto)
-    else:
-        texto = convertir_grupo(entero)
-    
-    return f'PESOS {texto} CON {decimal:02d}/100'
 
 # Titulo de la app
 st.markdown("# 📊 CALCULADORA IBM - LEY 24.557")
@@ -579,19 +506,8 @@ with tab3:
 
 # Mostrar últimos datos disponibles
 st.markdown("---")
-try:
-    df_ripte_info = pd.read_csv("data/dataset_ripte.csv", encoding='utf-8')
-    if not df_ripte_info.empty:
-        ultimo = df_ripte_info.iloc[0]
-        mes = ultimo['mes']
-        anio = ultimo['año']
-        valor = ultimo['indice_ripte']
-        st.success(f"""
-        📊 **Últimos Datos Disponibles:**  
-        **RIPTE** {mes}/{anio}: {valor:,.2f}
-        """)
-except:
-    pass
+from utils.info_datasets import mostrar_ultimos_datos_completo
+mostrar_ultimos_datos_completo()
 
 st.markdown("---")
 st.caption("**CALCULADORA IBM** | Ley 24.557 Art. 12 Inc. 1 | Actualización RIPTE")

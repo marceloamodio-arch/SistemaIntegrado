@@ -12,61 +12,11 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import math
 from utils.data_loader import get_ultimo_dato
+from utils.navegacion import mostrar_sidebar_navegacion
+from utils.formatters import formato_moneda, safe_parse_date
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Calculadora de Actualización",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# CSS personalizado
-st.markdown("""
-<style>
-    /* Ocultar Deploy y menú */
-    button[kind="header"], footer, 
-    [data-testid="stHeader"] svg[viewBox="0 0 16 16"] {
-        display: none !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Función para parsear fechas
-def safe_parse_date(s):
-    """Función de parseo de fechas"""
-    if s is None or (isinstance(s, float) and math.isnan(s)):
-        return None
-    if isinstance(s, (datetime, date)):
-        return s.date() if isinstance(s, datetime) else s
-    s = str(s).strip()
-    if not s:
-        return None
-    
-    fmts = [
-        "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%Y", "%Y/%m/%d", "%Y-%m",
-        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%B %Y", "%b %Y", 
-        "%Y/%m", "%m-%Y",
-    ]
-    
-    for f in fmts:
-        try:
-            dt = datetime.strptime(s, f)
-            if f in ("%m/%Y", "%Y-%m", "%Y/%m", "%m-%Y", "%B %Y", "%b %Y"):
-                return date(dt.year, dt.month, 1)
-            return dt.date()
-        except Exception:
-            continue
-    
-    try:
-        dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
-        if pd.isna(dt):
-            return None
-        if isinstance(dt, pd.Timestamp):
-            return dt.date()
-        return None
-    except Exception:
-        return None
+# Sidebar de navegación
+mostrar_sidebar_navegacion('actualizacion')
 
 # Cargar datasets
 @st.cache_data
@@ -81,12 +31,12 @@ def cargar_datasets():
                                        }) + '-01')
     
     df_tasa = pd.read_csv("data/dataset_tasa.csv", encoding='utf-8')
-    df_tasa['Desde'] = pd.to_datetime(df_tasa['Desde'])
-    df_tasa['Hasta'] = pd.to_datetime(df_tasa['Hasta'])
+    df_tasa['Desde'] = pd.to_datetime(df_tasa['Desde'], format='ISO8601', errors='coerce')
+    df_tasa['Hasta'] = pd.to_datetime(df_tasa['Hasta'], format='ISO8601', errors='coerce')
     df_tasa['Valor'] = df_tasa['Valor'].astype(str).str.replace(',', '.').astype(float)
     
     df_ipc = pd.read_csv("data/dataset_ipc.csv", encoding='utf-8')
-    df_ipc['periodo'] = pd.to_datetime(df_ipc['periodo'])
+    df_ipc['periodo'] = pd.to_datetime(df_ipc['periodo'], format='ISO8601', errors='coerce')
     
     return df_ripte, df_tasa, df_ipc
 
@@ -241,10 +191,41 @@ def actualizar_ipc(monto_base, fecha_inicial, fecha_final, df_ipc, tasa_pura):
         st.error(f"Error en cálculo de IPC: {str(e)}")
         return monto_base, 0.0, 0.0
 
-# Función para formatear montos
-def formato_moneda(valor):
-    """Formatea un valor como moneda argentina"""
-    return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def generar_desglose_texto(r):
+    """Genera desglose detallado en formato texto plano"""
+    ripte_sin_interes = r['monto'] * r['ripte_coef']
+    ipc_sin_interes = r['monto'] * (1 + r['ipc_inflacion'] / 100)
+    
+    texto = f"DESGLOSE DE ACTUALIZACIÓN\n"
+    texto += f"Período: {r['fecha_inicial'].strftime('%d/%m/%Y')} al {r['fecha_final'].strftime('%d/%m/%Y')}\n"
+    texto += f"Monto Original: {formato_moneda(r['monto'])}\n"
+    texto += "=" * 60 + "\n\n"
+    
+    texto += f"RIPTE + {r['tasa_pura_ripte']}% ANUAL\n"
+    texto += "-" * 60 + "\n"
+    texto += f"Monto Base:\t\t{formato_moneda(r['monto'])}\n"
+    texto += f"Coeficiente RIPTE:\t{r['ripte_coef']:.6f}\n"
+    texto += f"Monto Actualizado RIPTE:\t{formato_moneda(ripte_sin_interes)}\n"
+    texto += f"Tasa Pura {r['tasa_pura_ripte']}%:\t\t{formato_moneda(r['ripte_interes'])}\n"
+    texto += f"TOTAL RIPTE:\t\t{formato_moneda(r['ripte_total'])}\n\n"
+    
+    texto += "TASA ACTIVA BNA\n"
+    texto += "-" * 60 + "\n"
+    texto += f"Monto Base:\t\t{formato_moneda(r['monto'])}\n"
+    texto += f"Tasa Acumulada:\t\t{r['tasa_pct']:.2f}%\n"
+    texto += f"Intereses:\t\t{formato_moneda(r['tasa_total'] - r['monto'])}\n"
+    texto += f"TOTAL TASA:\t\t{formato_moneda(r['tasa_total'])}\n\n"
+    
+    texto += f"IPC + {r['tasa_pura_ipc']}% ANUAL\n"
+    texto += "-" * 60 + "\n"
+    texto += f"Monto Base:\t\t{formato_moneda(r['monto'])}\n"
+    texto += f"Inflación Acumulada:\t{r['ipc_inflacion']:.2f}%\n"
+    texto += f"Monto Actualizado IPC:\t{formato_moneda(ipc_sin_interes)}\n"
+    texto += f"Tasa Pura {r['tasa_pura_ipc']}%:\t\t{formato_moneda(r['ipc_interes'])}\n"
+    texto += f"TOTAL IPC:\t\t{formato_moneda(r['ipc_total'])}\n"
+    texto += "=" * 60 + "\n"
+    
+    return texto
 
 # Cargar datos
 try:
@@ -293,7 +274,7 @@ with col_izq:
     
     tasa_pura_ripte = st.slider(
         "RIPTE (%)",
-        min_value=1,
+        min_value=0,
         max_value=6,
         value=3,
         step=1
@@ -301,7 +282,7 @@ with col_izq:
     
     tasa_pura_ipc = st.slider(
         "IPC (%)",
-        min_value=1,
+        min_value=0,
         max_value=6,
         value=3,
         step=1
@@ -376,93 +357,86 @@ st.markdown("---")
 if 'resultados' in st.session_state:
     r = st.session_state.resultados
     
-    with st.expander("📋 DESGLOSE DETALLADO"):
-        col_d1, col_d2, col_d3 = st.columns(3)
+    tab1, tab2 = st.tabs(["📋 Desglose Detallado", "ℹ️ Información"])
+    
+    with tab1:
+        st.markdown("### 📋 Desglose para copiar")
+        texto_desglose = generar_desglose_texto(r)
+        st.code(texto_desglose, language=None)
+    
+    with tab2:
+        # Últimos datos disponibles
+        ultimo_ripte_txt = ""
+        ultimo_ipc_txt = ""
+        ultima_tasa_txt = ""
         
-        with col_d1:
-            st.markdown(f"**RIPTE + {r['tasa_pura_ripte']}%**")
-            ripte_sin_interes = r['monto'] * r['ripte_coef']
-            st.write(f"Monto RIPTE: {formato_moneda(ripte_sin_interes)}")
-            st.write(f"Interés: {formato_moneda(r['ripte_interes'])}")
-            st.write(f"**Total: {formato_moneda(r['ripte_total'])}**")
+        if not df_ripte.empty:
+            ultimo_ripte = get_ultimo_dato(df_ripte)
+            fecha_ripte = ultimo_ripte['fecha']
+            valor_ripte = ultimo_ripte['indice_ripte']
+            if pd.notnull(fecha_ripte):
+                mes_ripte = fecha_ripte.month if isinstance(fecha_ripte, pd.Timestamp) else fecha_ripte.month
+                año_ripte = fecha_ripte.year if isinstance(fecha_ripte, pd.Timestamp) else fecha_ripte.year
+                ultimo_ripte_txt = f"**RIPTE** {mes_ripte}/{año_ripte}: {valor_ripte:,.0f}".replace(",", ".")
         
-        with col_d2:
-            st.markdown("**Tasa Activa**")
-            st.write(f"Tasa: {r['tasa_pct']:.2f}%")
-            st.write(f"Intereses: {formato_moneda(r['tasa_total'] - r['monto'])}")
-            st.write(f"**Total: {formato_moneda(r['tasa_total'])}**")
+        if not df_ipc.empty:
+            ultimo_ipc = get_ultimo_dato(df_ipc)
+            fecha_ipc = ultimo_ipc['periodo']
+            variacion_ipc = ultimo_ipc['variacion_mensual']
+            if pd.notnull(fecha_ipc):
+                if isinstance(fecha_ipc, pd.Timestamp):
+                    mes_ipc = fecha_ipc.month
+                    año_ipc = fecha_ipc.year
+                else:
+                    fecha_ipc = pd.to_datetime(fecha_ipc)
+                    mes_ipc = fecha_ipc.month
+                    año_ipc = fecha_ipc.year
+                ultimo_ipc_txt = f"**IPC** {mes_ipc}/{año_ipc}: {variacion_ipc:.2f}%"
         
-        with col_d3:
-            st.markdown(f"**IPC + {r['tasa_pura_ipc']}%**")
-            ipc_sin_interes = r['monto'] * (1 + r['ipc_inflacion'] / 100)
-            st.write(f"Monto IPC: {formato_moneda(ipc_sin_interes)}")
-            st.write(f"Interés: {formato_moneda(r['ipc_interes'])}")
-            st.write(f"**Total: {formato_moneda(r['ipc_total'])}**")
-    
-    # Últimos datos disponibles
-    ultimo_ripte_txt = ""
-    ultimo_ipc_txt = ""
-    ultima_tasa_txt = ""
-    
-    if not df_ripte.empty:
-        ultimo_ripte = get_ultimo_dato(df_ripte)
-        fecha_ripte = ultimo_ripte['fecha']
-        valor_ripte = ultimo_ripte['indice_ripte']
-        if pd.notnull(fecha_ripte):
-            mes_ripte = fecha_ripte.month if isinstance(fecha_ripte, pd.Timestamp) else fecha_ripte.month
-            año_ripte = fecha_ripte.year if isinstance(fecha_ripte, pd.Timestamp) else fecha_ripte.year
-            ultimo_ripte_txt = f"RIPTE {mes_ripte}/{año_ripte}: {valor_ripte:,.0f}"
-    
-    if not df_ipc.empty:
-        ultimo_ipc = get_ultimo_dato(df_ipc)
-        fecha_ipc = ultimo_ipc['periodo']
-        variacion_ipc = ultimo_ipc['variacion_mensual']
-        if pd.notnull(fecha_ipc):
-            if isinstance(fecha_ipc, pd.Timestamp):
-                mes_ipc = fecha_ipc.month
-                año_ipc = fecha_ipc.year
-            else:
-                fecha_ipc = pd.to_datetime(fecha_ipc)
-                mes_ipc = fecha_ipc.month
-                año_ipc = fecha_ipc.year
-            ultimo_ipc_txt = f"IPC {mes_ipc}/{año_ipc}: {variacion_ipc:.2f}%"
-    
-    if not df_tasa.empty:
-        ultima_tasa = get_ultimo_dato(df_tasa)
-        valor_tasa = ultima_tasa['Valor']
-        fecha_hasta = ultima_tasa['Hasta']
-        if pd.notnull(fecha_hasta):
-            fecha_txt = fecha_hasta.strftime("%d/%m/%Y") if isinstance(fecha_hasta, pd.Timestamp) else pd.to_datetime(fecha_hasta).strftime("%d/%m/%Y")
-            ultima_tasa_txt = f"TASA {fecha_txt}: {valor_tasa:.2f}%"
-    
-    st.warning(f"**📊 Últimos Datos:** {ultimo_ripte_txt} | {ultimo_ipc_txt} | {ultima_tasa_txt}")
+        if not df_tasa.empty:
+            ultima_tasa = get_ultimo_dato(df_tasa)
+            valor_tasa = ultima_tasa['Valor']
+            fecha_hasta = ultima_tasa['Hasta']
+            if pd.notnull(fecha_hasta):
+                fecha_txt = fecha_hasta.strftime("%d/%m/%Y") if isinstance(fecha_hasta, pd.Timestamp) else pd.to_datetime(fecha_hasta).strftime("%d/%m/%Y")
+                ultima_tasa_txt = f"**TASA** {fecha_txt}: {valor_tasa:.2f}%"
+        
+        st.info(f"**📊 Últimos Datos Disponibles**")
+        st.markdown(ultimo_ripte_txt)
+        st.markdown(ultimo_ipc_txt)
+        st.markdown(ultima_tasa_txt)
+        
+        st.markdown("---")
+        st.markdown("""
+        ### 📊 Métodos de Actualización
+        
+        **RIPTE + Tasa Pura:**
+        - El RIPTE (Remuneración Imponible Promedio de los Trabajadores Estables) se utiliza como índice de actualización.
+        - Se aplica una tasa pura adicional seleccionable entre 0% y 6%.
+        - **Fuente:** Secretaría de Seguridad Social - Ministerio de Trabajo
+        
+        **Tasa Activa:**
+        - Tasa activa promedio del Banco de la Nación Argentina.
+        - Se calcula día a día según los valores históricos.
+        - **Fuente:** Banco de la Nación Argentina
+        
+        **IPC + Tasa Pura:**
+        - El IPC (Índice de Precios al Consumidor) refleja la variación inflacionaria.
+        - Se aplica una tasa pura adicional seleccionable entre 0% y 6%.
+        - **Fuente:** INDEC - Instituto Nacional de Estadística y Censos
+        
+        ### 🔢 Detalles Técnicos
+        
+        Todos los cálculos se realizan utilizando precisión decimal para garantizar exactitud legal.
+        Los redondeos se aplican según normas contables argentinas (Resoluciones Técnicas 17 y 41).
+        """)
+else:
+    st.info("Calcule para ver el desglose detallado")
 
-# Información sobre cálculos
-with st.expander("ℹ️ INFORMACIÓN SOBRE MÉTODOS DE ACTUALIZACIÓN"):
-    st.markdown("""
-    ### 📊 Métodos de Actualización
-    
-    **RIPTE + Tasa Pura:**
-    - El RIPTE (Remuneración Imponible Promedio de los Trabajadores Estables) se utiliza como índice de actualización.
-    - Se aplica una tasa pura adicional seleccionable entre 1% y 6%.
-    - **Fuente:** Secretaría de Seguridad Social - Ministerio de Trabajo
-    
-    **Tasa Activa:**
-    - Tasa activa promedio del Banco de la Nación Argentina.
-    - Se calcula día a día según los valores históricos.
-    - **Fuente:** Banco de la Nación Argentina
-    
-    **IPC + Tasa Pura:**
-    - El IPC (Índice de Precios al Consumidor) refleja la variación inflacionaria.
-    - Se aplica una tasa pura adicional seleccionable entre 1% y 6%.
-    - **Fuente:** INDEC - Instituto Nacional de Estadística y Censos
-    
-    ### 🔢 Detalles Técnicos
-    
-    Todos los cálculos se realizan utilizando precisión decimal para garantizar exactitud legal.
-    Los redondeos se aplican según normas contables argentinas (Resoluciones Técnicas 17 y 41).
-    
-    """)
+# Mostrar últimos datos disponibles
+st.markdown("---")
+from utils.info_datasets import mostrar_ultimos_datos_completo
+mostrar_ultimos_datos_completo()
 
 # Footer
 st.markdown("---")

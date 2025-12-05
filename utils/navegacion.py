@@ -64,7 +64,12 @@ def mostrar_sidebar_navegacion(app_actual=None):
         # Usuario en encabezado
         if 'usuario' in st.session_state and st.session_state.usuario:
             usuario = st.session_state.usuario
-            tipo = "(Adm)" if usuario['nivel'] == 'admin' else "(Nor)"
+            if usuario['nivel'] == 'superadmin':
+                tipo = "(Adm.Gral)"
+            elif usuario['nivel'] == 'admin':
+                tipo = "(Adm)"
+            else:
+                tipo = "(Usuario)"
             st.caption(f"👤 {usuario['username']} {tipo}")
         
         # Logo y título

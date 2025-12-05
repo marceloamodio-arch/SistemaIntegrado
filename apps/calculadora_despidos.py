@@ -20,80 +20,17 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 from utils.data_loader import get_ultimo_dato
+from utils.navegacion import mostrar_sidebar_navegacion
+from utils.info_datasets import mostrar_ultimos_datos
+from utils.formatters import formato_moneda, safe_parse_date, days_in_month
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Calculadora de Despidos",
-    page_icon="⚖️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# Sidebar de navegación
+mostrar_sidebar_navegacion('despidos')
 
-# CSS personalizado - simplificado para mejor compatibilidad
-st.markdown("""
-<style>
-    /* Ocultar Deploy y menú */
-    button[kind="header"], footer, 
-    [data-testid="stHeader"] svg[viewBox="0 0 16 16"] {
-        display: none !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Función para parsear fechas
-def safe_parse_date(s):
-    """Función de parseo de fechas"""
-    if s is None or (isinstance(s, float) and math.isnan(s)):
-        return None
-    if isinstance(s, (datetime, date)):
-        return s.date() if isinstance(s, datetime) else s
-    s = str(s).strip()
-    if not s:
-        return None
-    
-    fmts = [
-        "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%Y", "%Y/%m/%d", "%Y-%m",
-        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%B %Y", "%b %Y", 
-        "%Y/%m", "%m-%Y",
-    ]
-    
-    for f in fmts:
-        try:
-            dt = datetime.strptime(s, f)
-            if f in ("%m/%Y", "%Y-%m", "%Y/%m", "%m-%Y", "%B %Y", "%b %Y"):
-                return date(dt.year, dt.month, 1)
-            return dt.date()
-        except Exception:
-            continue
-    
-    if "/" in s or "-" in s:
-        parts = s.replace("/", "-").split("-")
-        if len(parts) == 2:
-            try:
-                year, month = int(parts[0]), int(parts[1])
-                if 1900 <= year <= 2100 and 1 <= month <= 12:
-                    return date(year, month, 1)
-            except ValueError:
-                pass
-    
-    try:
-        dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
-        if pd.isna(dt):
-            return None
-        if isinstance(dt, pd.Timestamp):
-            return dt.date()
-        return None
-    except Exception:
-        return None
-
-# Función para días del mes
-def days_in_month(d: date) -> int:
-    """Días en el mes"""
-    if d.month == 12:
-        nxt = date(d.year + 1, 1, 1)
-    else:
-        nxt = date(d.year, d.month + 1, 1)
-    return (nxt - date(d.year, d.month, 1)).days
+# Título de la app
+st.markdown("# ⚖️ CALCULADORA DE DESPIDOS")
+st.markdown("### Indemnizaciones Laborales - Ley 20.744")
+st.markdown("---")
 
 # Cargar datasets
 @st.cache_data
@@ -182,7 +119,7 @@ def calcular_dias_vacaciones(años_antiguedad):
 
 # Función para actualizar por RIPTE
 def actualizar_ripte(monto_base, fecha_inicial, fecha_final, df_ripte):
-    """Actualiza un monto por RIPTE + 3%"""
+    """Actualiza un monto por RIPTE + 3% - adaptado para CSV invertido"""
     try:
         if df_ripte.empty:
             return monto_base
@@ -190,19 +127,19 @@ def actualizar_ripte(monto_base, fecha_inicial, fecha_final, df_ripte):
         fecha_pmi = pd.to_datetime(fecha_inicial)
         fecha_final_date = pd.to_datetime(fecha_final)
         
-        # Obtener RIPTE inicial
+        # Obtener RIPTE inicial (CSV invertido: más reciente primero)
         ripte_pmi_data = df_ripte[df_ripte['fecha'] <= fecha_pmi]
         if ripte_pmi_data.empty:
-            ripte_pmi = float(get_ultimo_dato(df_ripte)['indice_ripte'])
+            ripte_pmi = float(df_ripte.iloc[-1]['indice_ripte'])  # Más antiguo
         else:
-            ripte_pmi = float(get_ultimo_dato(ripte_pmi_data)['indice_ripte'])
+            ripte_pmi = float(ripte_pmi_data.iloc[0]['indice_ripte'])  # Más reciente <= fecha_pmi
         
-        # Obtener RIPTE final
+        # Obtener RIPTE final (CSV invertido: más reciente primero)
         ripte_final_data = df_ripte[df_ripte['fecha'] <= fecha_final_date]
         if ripte_final_data.empty:
-            ripte_final = float(get_ultimo_dato(df_ripte)['indice_ripte'])
+            ripte_final = float(df_ripte.iloc[-1]['indice_ripte'])  # Más antiguo
         else:
-            ripte_final = float(get_ultimo_dato(ripte_final_data)['indice_ripte'])
+            ripte_final = float(ripte_final_data.iloc[0]['indice_ripte'])  # Más reciente <= fecha_final
         
         # Calcular coeficiente RIPTE
         coeficiente = ripte_final / ripte_pmi if ripte_pmi > 0 else 1.0
@@ -210,8 +147,12 @@ def actualizar_ripte(monto_base, fecha_inicial, fecha_final, df_ripte):
         # Aplicar RIPTE
         ripte_actualizado = monto_base * coeficiente
         
-        # Aplicar 3% adicional
-        interes_puro = ripte_actualizado * 0.03
+        # Calcular días para interés 3%
+        dias = (fecha_final_date - fecha_pmi).days
+        factor_dias = dias / 365.0
+        
+        # Aplicar 3% proporcional
+        interes_puro = ripte_actualizado * 0.03 * factor_dias
         
         total_ripte_3 = ripte_actualizado + interes_puro
         
@@ -321,11 +262,6 @@ def calcular_ipc_acumulado(fecha_inicial, fecha_final, df_ipc):
     except Exception as e:
         st.error(f"Error en cálculo de IPC: {str(e)}")
         return 0.0
-
-# Función para formatear montos
-def formato_moneda(valor):
-    """Formatea un valor como moneda argentina"""
-    return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # Función para generar PDF
 def generar_pdf(datos_calculo, datos_actualizacion):
@@ -492,14 +428,6 @@ def generar_pdf(datos_calculo, datos_actualizacion):
     buffer.seek(0)
     return buffer
 
-# Header con estilo inline completo
-st.markdown("""
-<div style="background-color: #2E86AB; padding: 20px; border-radius: 10px; text-align: center; color: white; margin-bottom: 30px;">
-    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: white;">⚖️ CALCULADORA DE DESPIDOS</h1>
-    <h2 style="margin: 5px 0 0 0; font-size: 18px; font-weight: normal; color: white;">Sistema de Cálculo de Indemnizaciones Laborales</h2>
-</div>
-""", unsafe_allow_html=True)
-
 # Cargar datasets
 df_ripte, df_tasa, df_ipc = cargar_datasets()
 
@@ -653,6 +581,21 @@ with col_results:
             'tasa': actualizado_tasa,
             'ipc': ipc_acumulado
         }
+        
+        # Guardar rubros para el PDF
+        st.session_state.datos_rubros = {
+            'Antigüedad Art. 245': float(antiguedad_245),
+            'Sustitutiva de Preaviso': float(sustitutiva_preaviso),
+            'SAC Preaviso': float(sac_preaviso),
+            'Días trabajados del Mes': float(dias_trabajados),
+            'Integración mes de Despido': float(integracion_mes),
+            'SAC Integración': float(sac_integracion),
+            'SAC Proporcional': float(sac_proporcional),
+            'Vacaciones no Gozadas': float(vacaciones),
+            'SAC Vacaciones': float(sac_vacaciones),
+            'total': float(total),
+            'antiguedad_años': años
+        }
 
 # Mostrar resultados si existen
 if 'datos_calculo' in st.session_state:
@@ -698,48 +641,64 @@ if 'datos_calculo' in st.session_state:
             with col_i:
                 st.markdown(f"**{importe}**")
         
-        # Total final
+        # Total final en rojo
         total_final = datos['total']
+        st.error("**💰 INDEMNIZACIÓN TOTAL**")
         st.metric(
-            label="INDEMNIZACIÓN TOTAL",
-            value=formato_moneda(total_final)
+            label="Total",
+            value=formato_moneda(total_final),
+            label_visibility="collapsed"
         )
 
-# Actualizaciones centradas debajo
+# Actualizaciones estilo LRT
 if 'datos_actualizacion' in st.session_state:
     st.markdown("---")
-    st.subheader(f"📈 ACTUALIZACIONES AL {st.session_state.datos_calculo['fecha_liquidacion']}")
-    
-    col_act1, col_act2, col_act3 = st.columns(3)
+    st.markdown("### 📈 Actualizaciones e intereses")
     
     datos_act = st.session_state.datos_actualizacion
     
-    with col_act1:
-        st.success("**RIPTE + 3%**")
+    # Determinar cuál es mayor
+    es_ripte_mayor = datos_act['ripte'] >= datos_act['tasa']
+    
+    # Primera fila - RIPTE y TASA (2 columnas)
+    col_1, col_2 = st.columns(2)
+    
+    with col_1:
+        st.success("**RIPTE + 3% ANUAL**") if es_ripte_mayor else st.info("**RIPTE + 3% ANUAL**")
         st.metric(
-            label="Monto Actualizado",
+            label="Total Actualizado",
             value=formato_moneda(datos_act['ripte']),
-            label_visibility="collapsed"
+            delta=f"+{formato_moneda(datos_act['ripte'] - st.session_state.datos_rubros['total'])}" if 'datos_rubros' in st.session_state else None
         )
-        st.caption(f"Desde {st.session_state.datos_calculo['fecha_despido']} hasta {st.session_state.datos_calculo['fecha_liquidacion']}")
+        with st.expander("Ver detalle"):
+            st.write(f"**Período:** {st.session_state.datos_calculo['fecha_despido']} a {st.session_state.datos_calculo['fecha_liquidacion']}")
     
-    with col_act2:
-        st.success("**Tasa Activa**")
+    with col_2:
+        st.success("**TASA ACTIVA BNA**") if not es_ripte_mayor else st.info("**TASA ACTIVA BNA**")
         st.metric(
-            label="Monto Actualizado",
+            label="Total Actualizado",
             value=formato_moneda(datos_act['tasa']),
-            label_visibility="collapsed"
+            delta=f"+{formato_moneda(datos_act['tasa'] - st.session_state.datos_rubros['total'])}" if 'datos_rubros' in st.session_state else None
         )
-        st.caption(f"Desde {st.session_state.datos_calculo['fecha_despido']} hasta {st.session_state.datos_calculo['fecha_liquidacion']}")
+        with st.expander("Ver detalle"):
+            st.write(f"**Período:** {st.session_state.datos_calculo['fecha_despido']} a {st.session_state.datos_calculo['fecha_liquidacion']}")
     
-    with col_act3:
-        st.info("**IPC (Ref.)**")
+    st.markdown("---")
+    
+    # Segunda fila - Inflación (columna derecha, dejando espacio a la izquierda)
+    col_vacio, col_inflacion = st.columns(2)
+    
+    with col_vacio:
+        pass  # Espacio para futura tasa
+    
+    with col_inflacion:
+        st.error("**INFLACIÓN ACUMULADA (Referencia)**")
         st.metric(
-            label="Variación",
-            value=f"{datos_act['ipc']:.2f}%",
-            label_visibility="collapsed"
+            label="Total Acumulado",
+            value=f"{datos_act['ipc']:.2f}%"
         )
-        st.caption("Variación inflacionaria del período")
+        with st.expander("Ver detalle"):
+            st.write(f"**Período:** {st.session_state.datos_calculo['fecha_despido']} a {st.session_state.datos_calculo['fecha_liquidacion']}")
     
     # Últimos datos disponibles
     ultimo_ripte_txt = ""
@@ -786,92 +745,215 @@ if 'datos_actualizacion' in st.session_state:
             else:
                 fecha_txt = pd.to_datetime(fecha_hasta).strftime("%d/%m/%Y")
             ultima_tasa_txt = f"TASA ACTIVA {fecha_txt}: {valor_tasa:.2f}%"
-    
-    # Mostrar cuadro de últimos datos
-    st.warning(f"""
-    **📊 Últimos Datos Disponibles:**  
-    {ultimo_ripte_txt}  
-    {ultimo_ipc_txt}  
-    {ultima_tasa_txt}
-    """)
-    
-    # Botón de PDF
-    if st.button("📄 IMPRIMIR PDF", use_container_width=True, key="generar_pdf_button"):
-        st.session_state.mostrar_campos_pdf = True
-    
-    # Mostrar campos solo si se presionó el botón
-    if st.session_state.get('mostrar_campos_pdf', False):
-        st.subheader("📋 Datos para el PDF")
-        
-        col_exp1, col_exp2 = st.columns(2)
-        
-        with col_exp1:
-            nro_expediente = st.text_input("Nro. de Expediente", key="nro_expediente_pdf")
-        
-        with col_exp2:
-            caratula = st.text_input("Carátula", key="caratula_pdf")
-        
-        # Generar PDF directamente
-        st.session_state.datos_calculo['nro_expediente'] = nro_expediente
-        st.session_state.datos_calculo['caratula'] = caratula
-        
-        pdf_buffer = generar_pdf(st.session_state.datos_calculo, st.session_state.datos_actualizacion)
-        
-        st.download_button(
-            label="📥 DESCARGAR PDF",
-            data=pdf_buffer,
-            file_name=f"liquidacion_despido_{st.session_state.datos_calculo['fecha_despido'].replace('/', '')}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            key="download_pdf_button"
-        )
 
-# Información sobre cálculos
-with st.expander("ℹ️ INFORMACIÓN SOBRE CÁLCULOS Y FUENTES"):
-    st.markdown("""
-    ### 📘 Marco Legal - Ley 20.744 (LCT)
+# Tabs para resultados y PDF (fuera del bloque condicional)
+if 'datos_actualizacion' in st.session_state and 'datos_rubros' in st.session_state:
+    st.markdown("---")
+    tab_pdf, tab_info = st.tabs(["🖨️ Imprimir PDF", "ℹ️ Información"])
     
-    **Antigüedad (Art. 245):** Se calcula 1 mes de salario por cada año de servicio o fracción mayor a 3 meses.
+    datos_act = st.session_state.datos_actualizacion
     
-    **Sustitutiva de Preaviso:** 
-    - Antigüedad menor a 5 años: 1 mes de salario
-    - Antigüedad mayor a 4 años: 2 meses de salario
+    with tab_pdf:
+        st.subheader("🖨️ Imprimir PDF")
+        
+        # Inputs opcionales para PDF
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            nro_expediente = st.text_input("Nro. Expediente (opcional)", key="nro_exp_despidos", help="Aparecerá en el PDF si lo completa")
+        with col_exp2:
+            caratula = st.text_input("Carátula (opcional)", key="caratula_despidos", help="Aparecerá en el PDF si lo completa")
+        
+        st.markdown("---")
+        
+        # Determinar método más favorable
+        es_ripte_mayor = datos_act['ripte'] >= datos_act['tasa']
+        
+        # HTML estilo LRT moderno mejorado
+        rubros = st.session_state.datos_rubros
+        
+        # Preparar header con expediente y carátula si existen
+        header_extra = ""
+        if nro_expediente or caratula:
+            header_extra = '<div style="font-size: 10px; color: #718096; margin-top: 5px;">'
+            if nro_expediente:
+                header_extra += f'<strong>Expte.:</strong> {nro_expediente}'
+            if nro_expediente and caratula:
+                header_extra += ' | '
+            if caratula:
+                header_extra += f'<strong>Carátula:</strong> {caratula}'
+            header_extra += '</div>'
+        
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        @page {{size: A4; margin: 1cm;}}
+        * {{box-sizing: border-box; margin: 0; padding: 0;}}
+        body {{font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; padding: 20px; line-height: 1.4;}}
+        .container {{max-width: 100%;}}
+        .header {{text-align: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0;}}
+        .header h1 {{font-size: 20px; color: #2d3748; margin-bottom: 5px;}}
+        .header p {{font-size: 11px; color: #718096;}}
+        
+        .rubros-section {{margin: 15px 0;}}
+        .rubros-table {{width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);}}
+        .rubros-table tr {{border-bottom: 1px solid #e2e8f0;}}
+        .rubros-table tr:last-child {{border-bottom: none;}}
+        .rubros-table td {{padding: 8px 12px; font-size: 10px;}}
+        .rubros-table td:first-child {{color: #4a5568; width: 70%;}}
+        .rubros-table td:last-child {{font-weight: bold; color: #2d3748; text-align: right; width: 30%;}}
+        
+        .formula-section {{background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; margin: 15px 0; text-align: center;}}
+        .formula-title {{font-size: 13px; font-weight: bold; margin-bottom: 8px;}}
+        .formula-total {{font-size: 32px; font-weight: bold; margin: 10px 0;}}
+        .formula-note {{font-size: 9px; opacity: 0.9;}}
+        
+        .actualizaciones {{margin: 15px 0;}}
+        .act-row {{display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;}}
+        .act-card {{padding: 12px; border-radius: 8px; text-align: center;}}
+        .act-card.winner {{background: rgba(40, 167, 69, 0.1); border: 2px solid #28a745;}}
+        .act-card.normal {{background: rgba(128, 128, 128, 0.1); border: 1px solid #cbd5e0;}}
+        .act-title {{font-size: 12px; font-weight: bold; color: #2d3748; margin-bottom: 5px;}}
+        .act-value {{font-size: 28px; font-weight: bold; color: #2d3748; margin: 5px 0;}}
+        .act-badge {{display: inline-block; background: #28a745; color: white; padding: 3px 8px; border-radius: 12px; font-size: 8px; font-weight: bold; margin-top: 5px;}}
+        .act-detail {{font-size: 10px; color: #718096; margin-top: 5px;}}
+        
+        .inflacion-full {{padding: 12px; border-radius: 8px; text-align: center; background: rgba(220, 53, 69, 0.1); border: 1px solid #dc3545; margin-top: 10px;}}
+        
+        .period-info {{background: #f7fafc; padding: 10px; border-radius: 8px; font-size: 10px; text-align: center; color: #4a5568; margin: 15px 0; line-height: 1.4;}}
+        
+        .footer {{text-align: center; font-size: 9px; color: #a0aec0; margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0; line-height: 1.3;}}
+        
+        .print-btn {{background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; margin-bottom: 15px; transition: background 0.3s;}}
+        .print-btn:hover {{background: #5568d3;}}
+        
+        @media print {{.no-print {{display: none;}}}}
+    </style>
+</head>
+<body>
+    <button class="print-btn no-print" onclick="window.print()">🖨️ IMPRIMIR PDF</button>
     
-    **SAC Preaviso:** Doceava parte de la sustitutiva de preaviso.
+    <div class="container">
+        <div class="header">
+            <h1>⚖️ LIQUIDACIÓN POR DESPIDO</h1>
+            <p>Ley 20.744 - Contrato de Trabajo</p>
+            {header_extra}
+        </div>
+        
+        <div class="rubros-section">
+            <table class="rubros-table">
+"""
+        
+        # Agregar rubros en tabla vertical
+        for concepto, monto in rubros.items():
+            if concepto not in ['total', 'antiguedad_años'] and monto > 0:
+                html_content += f'                <tr><td>{concepto}</td><td>${monto:,.2f}</td></tr>\n'
+        
+        html_content += f"""
+            </table>
+        </div>
+        
+        <div class="formula-section">
+            <div class="formula-title">💰 INDEMNIZACIÓN POR DESPIDO</div>
+            <div class="formula-total">${rubros['total']:,.2f}</div>
+            <div class="formula-note">Total de conceptos liquidados</div>
+        </div>
+        
+        <div class="actualizaciones">
+            <div class="act-row">
+                <div class="act-card {'winner' if es_ripte_mayor else 'normal'}">
+                    <div class="act-title">📈 RIPTE + 3%</div>
+                    <div class="act-value">${datos_act['ripte']:,.2f}</div>
+                    {'<span class="act-badge">✓ MÁS FAVORABLE</span>' if es_ripte_mayor else ''}
+                    <div class="act-detail">Coef: {(datos_act['ripte'] / rubros['total']):.4f}</div>
+                </div>
+                <div class="act-card {'winner' if not es_ripte_mayor else 'normal'}">
+                    <div class="act-title">💵 TASA ACTIVA BNA</div>
+                    <div class="act-value">${datos_act['tasa']:,.2f}</div>
+                    {'<span class="act-badge">✓ MÁS FAVORABLE</span>' if not es_ripte_mayor else ''}
+                    <div class="act-detail">Tasa acum: {((datos_act['tasa'] / rubros['total'] - 1) * 100):.2f}%</div>
+                </div>
+            </div>
+            
+            <div class="inflacion-full">
+                <div class="act-title">📊 INFLACIÓN ACUMULADA (Referencia)</div>
+                <div class="act-value">{datos_act['ipc']:.2f}%</div>
+                <div class="act-detail">Acumulado período IPC</div>
+            </div>
+        </div>
+        
+        <div class="period-info">
+            📅 <strong>Período:</strong> {st.session_state.datos_calculo['fecha_despido']} - {st.session_state.datos_calculo['fecha_liquidacion']} | 
+            👤 <strong>Antigüedad:</strong> {rubros.get('antiguedad_años', 0)} años | 
+            💰 <strong>Salario:</strong> ${st.session_state.datos_calculo['salario']:,.2f}
+        </div>
+        
+        <div class="footer">
+            Sistema Integrado - Tribunal de Trabajo 2 Quilmes<br>
+            Generado el {date.today().strftime('%d/%m/%Y')}
+        </div>
+    </div>
+</body>
+</html>
+"""
+        
+        # Mostrar PDF en iframe
+        st.components.v1.html(html_content, height=950, scrolling=True)
+
+
     
-    **Días Trabajados:** Se divide el salario por la cantidad de días del mes y se multiplica por los días trabajados durante el mes de despido.
-    
-    **Integración Mes de Despido:** Corresponde a los días que restan para completar el mes. No se paga si el despido coincide con el último día del mes.
-    
-    **SAC Integración:** Doceava parte de la integración del mes.
-    
-    **SAC Proporcional:** Se calcula proporcionalmente desde el último aguinaldo pagado (enero o julio) hasta la fecha de despido.
-    
-    **Vacaciones no Gozadas:** Según antigüedad:
-    - Menos de 5 años: 14 días corridos
-    - De 5 a 10 años: 21 días corridos
-    - De 10 a 20 años: 28 días corridos
-    - Más de 20 años: 35 días corridos
-    
-    **SAC Vacaciones:** Doceava parte del valor de las vacaciones.
-    
-    ### 📊 Métodos de Actualización
-    
-    **RIPTE + 3%:** Remuneración Imponible Promedio de los Trabajadores Estables, más un 3% adicional.
-    - **Fuente:** Secretaría de Seguridad Social - Ministerio de Trabajo
-    
-    **Tasa Activa:** Tasa activa promedio del Banco Nación
-    - **Fuente:** Banco de la Nación Argentina
-    
-    **IPC (Referencia):** Índice de Precios al Consumidor
-    - **Fuente:** INDEC - Instituto Nacional de Estadística y Censos
-    
-    ### 🔢 Detalles Técnicos
-    
-    Todos los cálculos se realizan utilizando precisión decimal para garantizar exactitud legal.
-    Los redondeos se aplican según normas contables argentinas (Resoluciones Técnicas 17 y 41).
-    
-    """)
+    with tab_info:
+        st.markdown("""
+        ### 📘 Marco Legal - Ley 20.744 (LCT)
+        
+        **Antigüedad (Art. 245):** Se calcula 1 mes de salario por cada año de servicio o fracción mayor a 3 meses.
+        
+        **Sustitutiva de Preaviso:** 
+        - Antigüedad menor a 5 años: 1 mes de salario
+        - Antigüedad mayor a 4 años: 2 meses de salario
+        
+        **SAC Preaviso:** Doceava parte de la sustitutiva de preaviso.
+        
+        **Días Trabajados:** Se divide el salario por la cantidad de días del mes y se multiplica por los días trabajados durante el mes de despido.
+        
+        **Integración Mes de Despido:** Corresponde a los días que restan para completar el mes. No se paga si el despido coincide con el último día del mes.
+        
+        **SAC Integración:** Doceava parte de la integración del mes.
+        
+        **SAC Proporcional:** Se calcula proporcionalmente desde el último aguinaldo pagado (enero o julio) hasta la fecha de despido.
+        
+        **Vacaciones no Gozadas:** Según antigüedad:
+        - Menos de 5 años: 14 días corridos
+        - De 5 a 10 años: 21 días corridos
+        - De 10 a 20 años: 28 días corridos
+        - Más de 20 años: 35 días corridos
+        
+        **SAC Vacaciones:** Doceava parte del valor de las vacaciones.
+        
+        ### 📊 Métodos de Actualización
+        
+        **RIPTE + 3%:** Remuneración Imponible Promedio de los Trabajadores Estables, más un 3% adicional.
+        - **Fuente:** Secretaría de Seguridad Social - Ministerio de Trabajo
+        
+        **Tasa Activa:** Tasa activa promedio del Banco Nación
+        - **Fuente:** Banco de la Nación Argentina
+        
+        **IPC (Referencia):** Índice de Precios al Consumidor
+        - **Fuente:** INDEC - Instituto Nacional de Estadística y Censos
+        
+        ### 🔢 Detalles Técnicos
+        
+        Todos los cálculos se realizan utilizando precisión decimal para garantizar exactitud legal.
+        Los redondeos se aplican según normas contables argentinas (Resoluciones Técnicas 17 y 41).
+        
+        """)
+
+# Mostrar últimos datos disponibles
+st.markdown("---")
+from utils.info_datasets import mostrar_ultimos_datos_completo
+mostrar_ultimos_datos_completo()
 
 # Footer
 st.markdown("---")

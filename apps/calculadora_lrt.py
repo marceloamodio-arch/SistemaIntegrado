@@ -13,181 +13,13 @@ import os
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
-import base64
 from decimal import Decimal, ROUND_HALF_UP
-from utils.data_loader import get_ultimo_dato
+from utils.navegacion import mostrar_sidebar_navegacion
+from utils.info_datasets import mostrar_ultimos_datos
+from utils.formatters import safe_parse_date, days_in_month, numero_a_letras, MESES_ES
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Calculadora Indemnizaciones LRT",
-    page_icon="⚖️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# CSS personalizado para replicar el diseño original
-st.markdown("""
-<style>
-    /* Colores principales */
-    :root {
-        --primary: #2E86AB;
-        --secondary: #A23B72;
-        --success: #F18F01;
-        --info: #C73E1D;
-        --light: #F8F9FA;
-        --dark: #343A40;
-        --highlight-ripte: #E8F5E8;
-        --highlight-tasa: #E8F5E8;
-    }
-    
-    /* Ocultar Deploy y menú de 3 puntos */
-    button[kind="header"] {
-        display: none;
-    }
-    
-    /* Ocultar los 3 puntos verticales */
-    [data-testid="stHeader"] svg[viewBox="0 0 16 16"] {
-        display: none;
-    }
-    
-    /* Ocultar footer */
-    footer {
-        display: none;
-    }
-    
-    /* Header personalizado */
-    .main-header {
-        background-color: #2E86AB;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        color: white;
-        margin-bottom: 30px;
-    }
-    
-    .main-header h1 {
-        margin: 0;
-        font-size: 28px;
-        font-weight: bold;
-    }
-    
-    .main-header h2 {
-        margin: 5px 0 0 0;
-        font-size: 18px;
-        font-weight: normal;
-    }
-    
-    /* Tarjetas de resultados */
-    .result-card {
-        background-color: #F8F9FA;
-        border-left: 4px solid #2E86AB;
-        padding: 20px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-    }
-    
-    .result-card.highlight-ripte {
-        background-color: #E8F5E8;
-        border-left-color: #28a745;
-    }
-    
-    .result-card.highlight-tasa {
-        background-color: #E8F5E8;
-        border-left-color: #28a745;
-    }
-    
-    .result-card h3 {
-        color: #2E86AB;
-        font-size: 16px;
-        margin-bottom: 10px;
-    }
-    
-    .result-amount {
-        font-size: 32px;
-        font-weight: bold;
-        color: #343A40;
-        margin: 10px 0;
-    }
-    
-    .result-detail {
-        font-size: 14px;
-        color: #666;
-        margin-top: 10px;
-    }
-    
-    /* Alertas */
-    .alert-box {
-        background-color: #C73E1D;
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 20px 0;
-    }
-    
-    .alert-box h4 {
-        margin-top: 0;
-    }
-    
-    /* Fórmula */
-    .formula-box {
-        background-color: #e7f3ff;
-        border: 1px solid #b3d9ff;
-        padding: 15px;
-        border-radius: 8px;
-        font-family: monospace;
-        margin: 20px 0;
-    }
-    
-    /* Botones personalizados */
-    .stButton>button {
-        background-color: #2E86AB;
-        color: white;
-        font-weight: bold;
-        border-radius: 5px;
-        padding: 10px 25px;
-        border: none;
-    }
-    
-    .stButton>button:hover {
-        background-color: #1a5f7a;
-    }
-    
-    /* Tablas */
-    .dataframe {
-        font-size: 14px;
-    }
-    
-    /* Sidebar */
-    .css-1d391kg {
-        background-color: #F8F9FA;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Alineación vertical corregida sin modificar ancho
-st.markdown("""
-<style>
-    /* Mantener columnas proporcionales */
-    [data-testid="stHorizontalBlock"] {
-        align-items: flex-start !important;
-    }
-
-    /* Tarjetas con alturas coherentes */
-    .result-card {
-        width: 100% !important;
-        min-height: 230px;   /* altura mínima homogénea */
-        margin-bottom: 18px; /* separación equilibrada entre tarjetas */
-    }
-
-    /* Ajuste solo para la última tarjeta (Últimos Datos Disponibles) */
-    .result-card:last-child {
-        margin-top: 32px; /* compensa visualmente la altura menor de la derecha */
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Password por defecto
-DEFAULT_PASSWORD = "todosjuntos"
+# Sidebar de navegación
+mostrar_sidebar_navegacion('lrt')
 
 # Paths de datasets
 DATASET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -202,138 +34,9 @@ def redondear(valor):
         return valor.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     return Decimal(str(valor)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-def safe_parse_date(s) -> Optional[date]:
-    """Función corregida de parseo de fechas"""
-    if s is None or (isinstance(s, float) and math.isnan(s)):
-        return None
-    if isinstance(s, (datetime, date)):
-        return s.date() if isinstance(s, datetime) else s
-    s = str(s).strip()
-    if not s:
-        return None
-    
-    fmts = [
-        "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%Y", "%Y/%m/%d", "%Y-%m",
-        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%B %Y", "%b %Y", 
-        "%Y/%m", "%m-%Y",
-    ]
-    
-    for f in fmts:
-        try:
-            dt = datetime.strptime(s, f)
-            if f in ("%m/%Y", "%Y-%m", "%Y/%m", "%m-%Y", "%B %Y", "%b %Y"):
-                return date(dt.year, dt.month, 1)
-            return dt.date()
-        except Exception:
-            continue
-    
-    if "/" in s or "-" in s:
-        parts = s.replace("/", "-").split("-")
-        if len(parts) == 2:
-            try:
-                year, month = int(parts[0]), int(parts[1])
-                if 1900 <= year <= 2100 and 1 <= month <= 12:
-                    return date(year, month, 1)
-            except ValueError:
-                pass
-    
-    try:
-        dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
-        if pd.isna(dt):
-            return None
-        if isinstance(dt, pd.Timestamp):
-            return dt.date()
-        return None
-    except Exception:
-        return None
-
-def days_in_month(d: date) -> int:
-    """Días en el mes"""
-    if d.month == 12:
-        nxt = date(d.year + 1, 1, 1)
-    else:
-        nxt = date(d.year, d.month + 1, 1)
-    return (nxt - date(d.year, d.month, 1)).days
-
-def numero_a_letras(numero):
-    """Convierte un número a su representación en letras (pesos argentinos)"""
-    unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE']
-    decenas = ['', '', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA']
-    especiales = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE']
-    centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS']
-    
-    def convertir_grupo(n):
-        if n == 0:
-            return ''
-        elif n == 100:
-            return 'CIEN'
-        elif n < 10:
-            return unidades[n]
-        elif n < 20:
-            return especiales[n - 10]
-        elif n < 100:
-            dec = n // 10
-            uni = n % 10
-            if uni == 0:
-                return decenas[dec]
-            else:
-                return decenas[dec] + (' Y ' if dec > 2 else 'I') + unidades[uni]
-        else:
-            cen = n // 100
-            resto = n % 100
-            if resto == 0:
-                return centenas[cen]
-            else:
-                return centenas[cen] + ' ' + convertir_grupo(resto)
-    
-    if numero == 0:
-        return 'CERO PESOS'
-    
-    entero = int(numero)
-    decimal = int(round((numero - entero) * 100))
-    
-    if entero >= 1000000000:
-        miles_millon = entero // 1000000000
-        resto = entero % 1000000000
-        texto = convertir_grupo(miles_millon) + ' MIL'
-        if resto >= 1000000:
-            millones = resto // 1000000
-            resto = resto % 1000000
-            texto += ' ' + (convertir_grupo(millones) if millones > 1 else 'UN') + ' MILLÓN' + ('ES' if millones > 1 else '')
-        if resto > 0:
-            if resto >= 1000:
-                miles = resto // 1000
-                resto = resto % 1000
-                texto += ' ' + convertir_grupo(miles) + ' MIL'
-            if resto > 0:
-                texto += ' ' + convertir_grupo(resto)
-    elif entero >= 1000000:
-        millones = entero // 1000000
-        resto = entero % 1000000
-        texto = (convertir_grupo(millones) if millones > 1 else 'UN') + ' MILLÓN' + ('ES' if millones > 1 else '')
-        if resto > 0:
-            if resto >= 1000:
-                miles = resto // 1000
-                resto = resto % 1000
-                texto += ' ' + convertir_grupo(miles) + ' MIL'
-            if resto > 0:
-                texto += ' ' + convertir_grupo(resto)
-    elif entero >= 1000:
-        miles = entero // 1000
-        resto = entero % 1000
-        texto = convertir_grupo(miles) + ' MIL'
-        if resto > 0:
-            texto += ' ' + convertir_grupo(resto)
-    else:
-        texto = convertir_grupo(entero)
-    
-    return f'PESOS {texto} CON {decimal:02d}/100'
-
 def get_mes_nombre(mes):
     """Retorna el nombre del mes en español"""
-    meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-             'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-    return meses[mes - 1]
+    return MESES_ES[mes]
 
 @dataclass
 class InputData:
@@ -485,7 +188,8 @@ class DataManager:
         
         self.ripte_data["fecha"] = self.ripte_data[fecha_col].apply(safe_parse_date)
         self.ripte_data["ripte"] = pd.to_numeric(self.ripte_data[val_col], errors="coerce")
-        self.ripte_data = self.ripte_data.dropna(subset=["fecha", "ripte"]).sort_values("fecha").reset_index(drop=True)
+        # SIN ORDENAR - respetar orden del CSV
+        self.ripte_data = self.ripte_data.dropna(subset=["fecha", "ripte"]).reset_index(drop=True)
 
     def _norm_tasa(self):
         """Normalización TASA"""
@@ -524,12 +228,11 @@ class DataManager:
             )
             self.tasa_data["tasa"] = pd.to_numeric(self.tasa_data["tasa"], errors="coerce")
 
-        # columnas útiles y orden
+        # columnas útiles pero SIN ORDENAR - respetar orden del CSV
         keep_cols = [c for c in ("fecha", "tasa", "desde", "hasta") if c in self.tasa_data.columns]
         if "fecha" in self.tasa_data.columns and "tasa" in self.tasa_data.columns:
             self.tasa_data = (
                 self.tasa_data.dropna(subset=["fecha", "tasa"])
-                .sort_values("fecha")
                 .reset_index(drop=True)
             )[keep_cols]
 
@@ -565,7 +268,8 @@ class DataManager:
         
         self.ipc_data["fecha"] = self.ipc_data[fecha_col].apply(safe_parse_date)
         self.ipc_data["ipc"] = pd.to_numeric(self.ipc_data[val_col], errors="coerce")
-        self.ipc_data = self.ipc_data.dropna(subset=["fecha", "ipc"]).sort_values("fecha").reset_index(drop=True)
+        # SIN ORDENAR - respetar orden del CSV
+        self.ipc_data = self.ipc_data.dropna(subset=["fecha", "ipc"]).reset_index(drop=True)
 
     def _norm_pisos(self):
         """Normalización PISOS"""
@@ -601,17 +305,25 @@ class DataManager:
         return candidate if candidate else (None, "")
     
     def get_ripte_coeficiente(self, fecha_pmi: date, fecha_final: date) -> Tuple[float, float, float]:
-        """Cálculo RIPTE"""
+        """Cálculo RIPTE - ahora CSV está ordenado de más reciente a más antiguo"""
         if self.ripte_data.empty:
             return 1.0, 0.0, 0.0
         
+        # Buscar RIPTE en fecha PMI (tomar el más reciente <= fecha_pmi)
         ripte_pmi_data = self.ripte_data[self.ripte_data['fecha'] <= fecha_pmi]
         if ripte_pmi_data.empty:
-            ripte_pmi = float(get_ultimo_dato(self.ripte_data)['ripte'])
+            # Si no hay datos antes de PMI, usar el más antiguo disponible
+            ripte_pmi = float(self.ripte_data.iloc[-1]['ripte'])
         else:
-            ripte_pmi = float(get_ultimo_dato(ripte_pmi_data)['ripte'])
+            # Tomar el primero (más reciente) de los que cumplen <= fecha_pmi
+            ripte_pmi = float(ripte_pmi_data.iloc[0]['ripte'])
         
-        ripte_final = float(get_ultimo_dato(self.ripte_data)['ripte'])
+        # Buscar RIPTE en fecha final (tomar el más reciente <= fecha_final)
+        ripte_final_data = self.ripte_data[self.ripte_data['fecha'] <= fecha_final]
+        if ripte_final_data.empty:
+            ripte_final = float(self.ripte_data.iloc[-1]['ripte'])
+        else:
+            ripte_final = float(ripte_final_data.iloc[0]['ripte'])
         
         coeficiente = ripte_final / ripte_pmi if ripte_pmi > 0 else 1.0
         
@@ -622,7 +334,7 @@ class DataManager:
         if self.tasa_data.empty:
             return 0.0, capital_base
             
-        total_aporte_pct = Decimal('0.0')
+        total_aporte_pct = 0.0
         
         for _, row in self.tasa_data.iterrows():
             if "desde" in self.tasa_data.columns and not pd.isna(row.get("desde")):
@@ -653,13 +365,12 @@ class DataManager:
                 else:
                     continue
                 
-                aporte_pct = redondear(Decimal(str(valor_mensual_pct)) * (Decimal(str(dias_interseccion)) / Decimal('30.0')))
-                total_aporte_pct = redondear(total_aporte_pct + aporte_pct)
+                aporte_pct = valor_mensual_pct * (dias_interseccion / 30.0)
+                total_aporte_pct += aporte_pct
         
-        capital_base_dec = Decimal(str(capital_base))
-        total_actualizado = redondear(capital_base_dec * (Decimal('1.0') + total_aporte_pct / Decimal('100.0')))
+        total_actualizado = capital_base * (1.0 + total_aporte_pct / 100.0)
         
-        return float(total_aporte_pct), float(total_actualizado)
+        return total_aporte_pct, total_actualizado
     
     def calcular_inflacion(self, fecha_pmi: date, fecha_final: date) -> float:
         """Cálculo de inflación"""
@@ -754,7 +465,7 @@ class Calculator:
         if piso_minimo is None:
             return capital_formula, False, "No se encontró piso mínimo para la fecha", 0.0
         
-        piso_proporcional = float(redondear(Decimal(str(piso_minimo)) * (Decimal(str(incapacidad_pct)) / Decimal('100'))))
+        piso_proporcional = piso_minimo * (incapacidad_pct / 100)
         
         if capital_formula >= piso_proporcional:
             return capital_formula, False, f"Supera piso mínimo {piso_norma}", piso_proporcional
@@ -792,75 +503,83 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar para formulario
-with st.sidebar:
-    st.header("📋 Datos del Caso")
-    
+# Formulario horizontal
+st.subheader("📋 Datos del Caso")
+
+# Primera fila - Fechas
+col1, col2 = st.columns(2)
+with col1:
     pmi_date_input = st.date_input(
-        "Fecha del siniestro (PMI)",
+        "📅 Fecha del siniestro (PMI)",
         value=date(2020, 1, 1),
         format="DD/MM/YYYY"
     )
-    
+with col2:
     final_date_input = st.date_input(
-        "Fecha final",
+        "📅 Fecha final",
         value=date.today(),
         format="DD/MM/YYYY"
     )
-    
+
+# Segunda fila - IBM, Edad, Incapacidad
+col3, col4, col5 = st.columns(3)
+with col3:
     ibm = st.number_input(
-        "Ingreso Base Mensual (IBM)",
+        "💰 IBM ($)",
         min_value=0.0,
         value=100000.0,
         step=1000.0,
         format="%.2f"
     )
-    
+with col4:
     edad = st.number_input(
-        "Edad del trabajador",
+        "👤 Edad",
         min_value=18,
         max_value=100,
         value=45,
         step=1
     )
-    
+with col5:
     incapacidad_pct = st.number_input(
-        "Porcentaje de incapacidad (%)",
+        "📊 Incapacidad (%)",
         min_value=0.01,
         max_value=100.0,
         value=50.0,
         step=0.1,
         format="%.2f"
     )
-    
+
+# Tercera fila - Checkbox y botón
+col6, col7 = st.columns([2, 1])
+with col6:
     incluir_20_pct = st.checkbox(
-        "Incluir 20% (art. 3, Ley 26.773)",
+        "Incluir 20% adicional (art. 3, Ley 26.773)",
         value=True
     )
-      
-    if st.button("🧮 CALCULAR", use_container_width=True, type="primary"):
-        try:
-            input_data = InputData(
-                pmi_date=pmi_date_input,
-                final_date=final_date_input,
-                ibm=ibm,
-                edad=edad,
-                incapacidad_pct=incapacidad_pct,
-                incluir_20_pct=incluir_20_pct
-            )
-            
-            if input_data.pmi_date > input_data.final_date:
-                st.error("La fecha PMI no puede ser posterior a la fecha final")
-            else:
-                st.session_state.results = st.session_state.calculator.calcular_indemnizacion(input_data)
-                st.session_state.input_data = input_data
-                st.success("✓ Cálculo realizado correctamente")
-                st.rerun()
-        except Exception as e:
-            st.error(f"Error en el cálculo: {str(e)}")
-      
-    st.markdown("---")
-    
+with col7:
+    calcular = st.button("🧮 CALCULAR", use_container_width=True, type="primary")
+
+if calcular:
+    try:
+        input_data = InputData(
+            pmi_date=pmi_date_input,
+            final_date=final_date_input,
+            ibm=ibm,
+            edad=edad,
+            incapacidad_pct=incapacidad_pct,
+            incluir_20_pct=incluir_20_pct
+        )
+        
+        if input_data.pmi_date > input_data.final_date:
+            st.error("⚠️ La fecha PMI no puede ser posterior a la fecha final")
+        else:
+            st.session_state.results = st.session_state.calculator.calcular_indemnizacion(input_data)
+            st.session_state.input_data = input_data
+            st.rerun()
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+
+st.markdown("---")
     
 # Main content - Resultados
 if st.session_state.results is not None:
@@ -869,150 +588,318 @@ if st.session_state.results is not None:
     
     # Tabs principales (agregamos tab6 para PDF)
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Resultados", 
+        "📊 Resultados",
+        "🖨️ Imprimir PDF",
         "📄 Sentencia", 
         "💰 Liquidación", 
         "📋 Mínimos SRT",
-        "ℹ️ Información",
-        "🖨️ Imprimir PDF"
+        "ℹ️ Información"
     ])
     
     with tab1:
-        col1, col2 = st.columns(2)
+        st.subheader("📊 Resultados del Cálculo")
         
-        with col1:
-            # Capital Base
-            st.markdown(f"""
-            <div class="result-card">
-                <h3>CAPITAL BASE (INDEMNIZACIÓN LEY 24.557)</h3>
-                <div class="result-amount">{NumberUtils.format_money(results.capital_base)}</div>
-                <div class="result-detail">
-                    Capital fórmula: {NumberUtils.format_money(results.capital_formula)}<br>
-                    20%: {NumberUtils.format_money(results.adicional_20_pct) if results.adicional_20_pct > 0 else 'No aplica'}<br>
-                    {results.piso_info}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # RIPTE + 3%
-            highlight_class = "highlight-ripte" if results.total_ripte_3 >= results.total_tasa_activa else ""
-            st.markdown(f"""
-            <div class="result-card {highlight_class}">
-                <h3>ACTUALIZACIÓN RIPTE + 3%</h3>
-                <div class="result-amount">{NumberUtils.format_money(results.total_ripte_3)}</div>
-                <div class="result-detail">
-                    Coef. RIPTE: {results.ripte_coef:.6f}<br>
-                    Total actualizado: {NumberUtils.format_money(results.ripte_actualizado)}<br>
-                    3% puro: {NumberUtils.format_money(results.interes_puro_3_pct)}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        # Primera fila - Capital Base
+        st.markdown("### 💼 Capital Base (Ley 24.557)")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric(
+                "Capital Fórmula",
+                NumberUtils.format_money(results.capital_formula)
+            )
+        with col_b:
+            st.metric(
+                "Adicional 20%",
+                NumberUtils.format_money(results.adicional_20_pct) if results.adicional_20_pct > 0 else "No aplica"
+            )
+        with col_c:
+            # Agregar (piso) si corresponde
+            label_piso = " (piso)" if results.piso_aplicado else ""
+            st.markdown(
+                f'<div style="text-align: left;"><p style="color: red; font-size: 14px; margin-bottom: 4px; font-weight: bold;">CAPITAL BASE TOTAL</p>'
+                f'<p style="color: red; font-size: 36px; font-weight: 600; margin: 0;">{NumberUtils.format_money(results.capital_base)}{label_piso}</p></div>',
+                unsafe_allow_html=True
+            )
         
-        with col2:
-            # Tasa Activa
-            highlight_class = "highlight-tasa" if results.total_tasa_activa > results.total_ripte_3 else ""
-            st.markdown(f"""
-            <div class="result-card {highlight_class}">
-                <h3>ACTUALIZACIÓN TASA ACTIVA BNA</h3>
-                <div class="result-amount">{NumberUtils.format_money(results.total_tasa_activa)}</div>
-                <div class="result-detail">
-                    Porcentual del período: {NumberUtils.format_percentage(results.tasa_activa_pct)}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-           # Inflación
-            st.markdown(f"""
-            <div class="result-card">
-                <h3>INFLACIÓN ACUMULADA (Referencia)</h3>
-                <div class="result-amount">{NumberUtils.format_percentage(results.inflacion_acum_pct)}</div>
-                <div class="result-detail">
-                    Inflación acumulada en el período
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        st.info(f"ℹ️ {results.piso_info}")
+        
+        # Fórmula aplicada (movida aquí)
+        with st.expander("🔢 Ver fórmula aplicada"):
+            st.code(f"""
+Fórmula: IBM × 53 × (65 / Edad) × (Incapacidad% / 100)
 
-        # Fórmula detallada
-        st.markdown(f"""
-        <div class="formula-box" style="color: #000;">
-            <strong>Fórmula aplicada:</strong><br>
-            IBM ({NumberUtils.format_money(input_data.ibm)}) × 53 × 65/edad({input_data.edad}) × Incapacidad ({input_data.incapacidad_pct}%)<br>
-            <strong>Capital calculado:</strong> {NumberUtils.format_money(results.capital_formula)}
-        </div>
-        """, unsafe_allow_html=True)
-    # 📊 Últimos Datos Disponibles 
-    data_mgr = st.session_state.data_manager
+Cálculo:
+{NumberUtils.format_money(input_data.ibm)} × 53 × (65 / {input_data.edad}) × ({input_data.incapacidad_pct}% / 100)
 
-    ultimo_ripte_txt = "RIPTE: N/D"
-    ultimo_ipc_txt = "IPC: N/D"
-    ultima_tasa_txt = "TASA ACTIVA: N/D"
-    ultimo_piso_txt = "PISO SRT: N/D"
-
-    # --- RIPTE ---
-    if not data_mgr.ripte_data.empty:
-        ultimo_ripte = get_ultimo_dato(data_mgr.ripte_data)
-        fecha_ripte = ultimo_ripte.get("fecha")
-        valor_ripte = ultimo_ripte.get("ripte", 0)
-        if pd.notnull(fecha_ripte):
-            ultimo_ripte_txt = f"RIPTE {fecha_ripte.month}/{fecha_ripte.year}: {valor_ripte:,.0f}"
-
-    # --- IPC: mostrar mes y año ---
-    if not data_mgr.ipc_data.empty:
-        ultimo_ipc = get_ultimo_dato(data_mgr.ipc_data)
-        mes_ipc = int(ultimo_ipc.get("mes", getattr(ultimo_ipc.get("fecha"), "month", 0)))
-        año_ipc = int(ultimo_ipc.get("año", getattr(ultimo_ipc.get("fecha"), "year", 0)))
-        variacion_ipc = ultimo_ipc.get("ipc", 0)
-        ultimo_ipc_txt = f"IPC {mes_ipc}/{año_ipc}: {NumberUtils.format_percentage(variacion_ipc)}"
-
-    # --- TASA ACTIVA: mostrar último día (columna 'hasta') ---
-    if not data_mgr.tasa_data.empty:
-        tasa_vista = data_mgr.tasa_data.copy()
-        ultima_tasa = get_ultimo_dato(data_mgr.tasa_data)
-        valor_tasa = ultima_tasa.get("tasa", 0)
-        fecha_hasta = ultima_tasa.get("hasta", None)
-        fecha_txt = ""
-        if pd.notnull(fecha_hasta):
-            fecha_txt = fecha_hasta.strftime("%d/%m/%Y")
-        ultima_tasa_txt = f"TASA ACTIVA {fecha_txt}: {NumberUtils.format_percentage(valor_tasa)}"
-
-    # --- PISO SRT: mostrar período (desde / hasta) y resolución ---
-    if not data_mgr.pisos_data.empty:
-        ultimo_piso = get_ultimo_dato(data_mgr.pisos_data)
-        norma = ultimo_piso.get("resol", "")
-        monto_piso = ultimo_piso.get("piso", 0)
-        desde = ultimo_piso.get("desde", None)
-        hasta = ultimo_piso.get("hasta", None)
-        periodo = ""
-        if pd.notnull(desde) and pd.notnull(hasta):
-            periodo = f"{desde.strftime('%d/%m/%Y')} al {hasta.strftime('%d/%m/%Y')}"
-        elif pd.notnull(desde):
-            periodo = f"Desde {desde.strftime('%d/%m/%Y')}"
-        elif pd.notnull(hasta):
-            periodo = f"Hasta {hasta.strftime('%d/%m/%Y')}"
-        ultimo_piso_txt = f"PISO SRT {norma} ({periodo}): {NumberUtils.format_money(monto_piso)}"
-
-    # --- Render final con estilo original ---
-    st.markdown(f"""
-    <div class="formula-box" style="
-        color: #000;
-        font-family: 'Source Sans Pro', sans-serif;
-        font-size: 14px;
-        border: 1px solid #d3d3d3;
-        border-radius: 8px;
-        padding: 10px 15px;
-        margin-top: 10px;
-        background-color: #fff9c4;
-        width: 100%;
-">
-        <strong>📊 Últimos Datos Disponibles:</strong><br>
-        {ultimo_ripte_txt}<br>
-        {ultimo_ipc_txt}<br>
-        {ultima_tasa_txt}<br>
-        {ultimo_piso_txt}
-    </div>
-    """, unsafe_allow_html=True)
-
+Capital calculado: {NumberUtils.format_money(results.capital_formula)}
+            """, language=None)
+        
+        st.markdown("---")
+        
+        # Segunda fila - Actualizaciones
+        st.markdown("### 📈 Actualizaciones e intereses")
+        col_1, col_2 = st.columns(2)
+        
+        with col_1:
+            # Determinar si RIPTE es mayor
+            es_mayor = results.total_ripte_3 >= results.total_tasa_activa
+            st.success("**RIPTE + 3% ANUAL**") if es_mayor else st.info("**RIPTE + 3% ANUAL**")
+            st.metric(
+                "Total Actualizado",
+                NumberUtils.format_money(results.total_ripte_3),
+                delta=f"+{NumberUtils.format_money(results.total_ripte_3 - results.capital_base)}"
+            )
+            with st.expander("Ver detalle"):
+                st.write(f"**Coeficiente RIPTE:** {results.ripte_coef:.6f}")
+                st.write(f"**Capital actualizado RIPTE:** {NumberUtils.format_money(results.ripte_actualizado)}")
+                st.write(f"**Interés puro 3%:** {NumberUtils.format_money(results.interes_puro_3_pct)}")
+        
+        with col_2:
+            # Determinar si Tasa es mayor
+            es_mayor = results.total_tasa_activa > results.total_ripte_3
+            st.success("**TASA ACTIVA BNA**") if es_mayor else st.info("**TASA ACTIVA BNA**")
+            st.metric(
+                "Total Actualizado",
+                NumberUtils.format_money(results.total_tasa_activa),
+                delta=f"+{NumberUtils.format_money(results.total_tasa_activa - results.capital_base)}"
+            )
+            with st.expander("Ver detalle"):
+                st.write(f"**Tasa acumulada período:** {NumberUtils.format_percentage(results.tasa_activa_pct)}")
+        
+        st.markdown("---")
+        
+        # Inflación (misma estructura de columnas que arriba)
+        col_vacio, col_inflacion = st.columns(2)
+        
+        with col_vacio:
+            # Espacio reservado para futura tasa adicional
+            pass
+        
+        with col_inflacion:
+            st.error("**INFLACIÓN ACUMULADA (Referencia)**")
+            st.metric(
+                "Total Acumulado",
+                NumberUtils.format_percentage(results.inflacion_acum_pct)
+            )
+            with st.expander("Ver detalle"):
+                st.write(f"**Período:** {input_data.pmi_date.strftime('%d/%m/%Y')} - {input_data.final_date.strftime('%d/%m/%Y')}")
+    
+    
     with tab2:
+        st.subheader("🖨️ Imprimir PDF")
+        
+        # Determinar método más favorable
+        if results.total_ripte_3 >= results.total_tasa_activa:
+            metodo_favorable = "RIPTE + 3%"
+            color_ripte = "#28a745"
+            color_tasa = "#6c757d"
+        else:
+            metodo_favorable = "Tasa Activa BNA"
+            color_ripte = "#6c757d"
+            color_tasa = "#28a745"
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Cálculo Indemnización LRT</title>
+            <style>
+                @page {{size: A4; margin: 1cm;}}
+                @media print {{
+                    body {{background: white !important;}}
+                    .container {{box-shadow: none !important;}}
+                    .no-print {{display: none !important;}}
+                }}
+                body {{
+                    font-family: 'Segoe UI', sans-serif;
+                    margin: 0;
+                    padding: 10px;
+                    background: #f0f2f5;
+                }}
+                .container {{
+                    background: white;
+                    border-radius: 8px;
+                    padding: 20px;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                    max-width: 800px;
+                    margin: 0 auto;
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 15px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #667eea;
+                }}
+                .header h1 {{
+                    color: #2d3748;
+                    font-size: 20px;
+                    margin: 0;
+                    font-weight: 700;
+                }}
+                .formula-section {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin-bottom: 12px;
+                    text-align: center;
+                }}
+                .formula-section h2 {{
+                    font-size: 13px;
+                    margin: 0 0 8px 0;
+                    font-weight: 600;
+                }}
+                .formula-text {{
+                    font-size: 13px;
+                    margin: 4px 0;
+                    font-family: 'Courier New', monospace;
+                    font-weight: 500;
+                }}
+                .result-big {{
+                    font-size: 32px;
+                    font-weight: 800;
+                    margin: 10px 0 8px 0;
+                }}
+                .result-label {{
+                    font-size: 11px;
+                    opacity: 0.95;
+                    font-weight: 500;
+                }}
+                .update-card {{
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 10px;
+                    border: 3px solid;
+                }}
+                .card-inner {{
+                    background: rgba(128,128,128,0.1);
+                    padding: 10px;
+                    border-radius: 6px;
+                }}
+                .update-ripte {{border-color: {color_ripte};}}
+                .update-tasa {{border-color: {color_tasa};}}
+                .update-inflacion {{border-color: #dc3545;}}
+                .card-title {{
+                    font-size: 12px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    margin-bottom: 8px;
+                    letter-spacing: 0.5px;
+                }}
+                .ripte-title {{color: {color_ripte};}}
+                .tasa-title {{color: {color_tasa};}}
+                .inflacion-title {{color: #dc3545;}}
+                .card-value {{
+                    font-size: 28px;
+                    font-weight: 800;
+                    margin: 8px 0;
+                }}
+                .ripte-value {{color: {color_ripte};}}
+                .tasa-value {{color: {color_tasa};}}
+                .inflacion-value {{color: #dc3545;}}
+                .card-detail {{
+                    font-size: 10px;
+                    color: #4a5568;
+                    margin-top: 6px;
+                }}
+                .winner-badge {{
+                    display: inline-block;
+                    background: #28a745;
+                    color: white;
+                    padding: 3px 10px;
+                    border-radius: 12px;
+                    font-size: 9px;
+                    font-weight: 700;
+                    margin-top: 6px;
+                }}
+                .footer {{
+                    text-align: center;
+                    margin-top: 12px;
+                    padding-top: 10px;
+                    border-top: 2px solid #e2e8f0;
+                    color: #718096;
+                    font-size: 9px;
+                    line-height: 1.3;
+                }}
+                .period-info {{
+                    background: #f7fafc;
+                    padding: 8px;
+                    border-radius: 6px;
+                    margin-top: 10px;
+                    text-align: center;
+                    font-size: 10px;
+                    color: #4a5568;
+                    border: 1px solid #e2e8f0;
+                    line-height: 1.4;
+                }}
+                .print-btn {{
+                    background: #667eea;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 600;
+                    margin: 15px auto;
+                    display: block;
+                    box-shadow: 0 4px 10px rgba(102, 126, 234, 0.4);
+                }}
+                .print-btn:hover {{
+                    background: #5568d3;
+                }}
+            </style>
+        </head>
+        <body>
+            <button class="print-btn no-print" onclick="window.print()">🖨️ IMPRIMIR PDF</button>
+            <div class="container">
+                <div class="header"><h1>⚖️ CÁLCULO INDEMNIZACIÓN LRT</h1></div>
+                <div class="formula-section">
+                    <h2>🧮 FÓRMULA APLICADA</h2>
+                    <div class="formula-text">IBM × 53 × (65 / Edad) × (Incapacidad% / 100)</div>
+                    <div class="formula-text">${input_data.ibm:,.2f} × 53 × (65 / {input_data.edad}) × ({input_data.incapacidad_pct}% / 100)</div>
+                    <div class="result-label">CAPITAL BASE TOTAL</div>
+                    <div class="result-big">${results.capital_base:,.2f}</div>
+                    <div class="result-label">{results.piso_info}</div>
+                </div>
+                <div class="update-card update-ripte">
+                    <div class="card-title ripte-title">📈 RIPTE + 3% ANUAL</div>
+                    <div class="card-inner">
+                        <div class="card-value ripte-value">${results.total_ripte_3:,.2f}</div>
+                        <div class="card-detail"><strong>Coef:</strong> {results.ripte_coef:.4f} | <strong>Interés 3%:</strong> ${results.interes_puro_3_pct:,.2f}</div>
+                        {"<div class='winner-badge'>✓ MÁS FAVORABLE</div>" if metodo_favorable == "RIPTE + 3%" else ""}
+                    </div>
+                </div>
+                <div class="update-card update-tasa">
+                    <div class="card-title tasa-title">💵 TASA ACTIVA BNA</div>
+                    <div class="card-inner">
+                        <div class="card-value tasa-value">${results.total_tasa_activa:,.2f}</div>
+                        <div class="card-detail"><strong>Tasa acum:</strong> {results.tasa_activa_pct:.2f}%</div>
+                        {"<div class='winner-badge'>✓ MÁS FAVORABLE</div>" if metodo_favorable == "Tasa Activa BNA" else ""}
+                    </div>
+                </div>
+                <div class="update-card update-inflacion">
+                    <div class="card-title inflacion-title">📊 INFLACIÓN ACUMULADA (Referencia)</div>
+                    <div class="card-inner">
+                        <div class="card-value inflacion-value">{results.inflacion_acum_pct:.2f}%</div>
+                        <div class="card-detail"><strong>Acumulado período IPC</strong></div>
+                    </div>
+                </div>
+                <div class="period-info">
+                    <strong>📅 Período:</strong> {input_data.pmi_date.strftime('%d/%m/%Y')} - {input_data.final_date.strftime('%d/%m/%Y')}<br>
+                    <strong>🎂 Edad:</strong> {input_data.edad} años | <strong>📊 Incapacidad:</strong> {input_data.incapacidad_pct}% | <strong>💰 IBM:</strong> ${input_data.ibm:,.2f}
+                </div>
+                <div class="footer">Sistema Integrado - Tribunal de Trabajo 2 Quilmes<br>Generado el {date.today().strftime('%d/%m/%Y')}</div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Mostrar vista previa con altura ajustada
+        st.components.v1.html(html_content, height=950, scrolling=True)
+
+    with tab3:
         st.subheader("📄 Texto para Sentencia")
         
         # Generar texto de sentencia según ejemplo
@@ -1044,7 +931,7 @@ c) Mientras la tasa legal aplicable (Tasa Activa Banco Nación) alcanzó para el
         if st.button("📋 Copiar Texto", key="copy_sentencia"):
             st.success("✓ Texto copiado al portapapeles")
     
-    with tab3:
+    with tab4:
         st.subheader("💰 Liquidación Judicial")
         
         # Determinar método más favorable
@@ -1064,6 +951,15 @@ c) Mientras la tasa legal aplicable (Tasa Activa Banco Nación) alcanzó para el
         # Calcular porcentaje de incremento RIPTE
         pct_ripte = (results.ripte_coef - 1) * 100
         
+        # Obtener fecha del último RIPTE disponible (primer registro ya que CSV está invertido)
+        if not data_mgr.ripte_data.empty:
+            fecha_ultimo_ripte = data_mgr.ripte_data.iloc[0]['fecha']
+            mes_ultimo_ripte = get_mes_nombre(fecha_ultimo_ripte.month)
+            anio_ultimo_ripte = fecha_ultimo_ripte.year
+        else:
+            mes_ultimo_ripte = get_mes_nombre(input_data.final_date.month)
+            anio_ultimo_ripte = input_data.final_date.year
+        
         # Calcular tasas judiciales (2.2% según ejemplo)
         tasa_justicia = total_actualizacion * 0.022
         sobretasa_caja = tasa_justicia * 0.10
@@ -1076,7 +972,7 @@ c) Mientras la tasa legal aplicable (Tasa Activa Banco Nación) alcanzó para el
 **LIQUIDACION** que practica la Actuaria en el presente expediente. ** **
 
 --Capital {NumberUtils.format_money(results.capital_base)} 
---Actualización mediante {metodo_usado}, ({get_mes_nombre(get_ultimo_dato(data_mgr.ripte_data)['fecha'].month)}/{get_ultimo_dato(data_mgr.ripte_data)['fecha'].year} {results.ripte_final:,.2f} -último índice publicado- / {mes_pmi} {anio_pmi} {results.ripte_pmi:,.2f} = coef {results.ripte_coef:.2f} = {pct_ripte:.0f}%) {NumberUtils.format_money(results.ripte_actualizado)} 
+--Actualización mediante {metodo_usado}, ({mes_ultimo_ripte}/{anio_ultimo_ripte} {results.ripte_final:,.2f} -último índice publicado- / {mes_pmi} {anio_pmi} {results.ripte_pmi:,.2f} = coef {results.ripte_coef:.2f} = {pct_ripte:.0f}%) {NumberUtils.format_money(results.ripte_actualizado)} 
 --Interés puro del 3% anual desde {input_data.pmi_date.strftime('%d/%m/%Y')} hasta {input_data.final_date.strftime('%d/%m/%Y')} {NumberUtils.format_money(results.interes_puro_3_pct)} 
 --SUBTOTAL {NumberUtils.format_money(total_actualizacion)} 
 
@@ -1099,11 +995,14 @@ De la liquidación practicada, traslado a las partes por el plazo de cinco (5) d
             if st.button("🖨️ Ir a Imprimir PDF", key="goto_print"):
                 st.info("👉 Use la pestaña 'Imprimir PDF' para generar el documento completo")
     
-    with tab4:
+    with tab5:
         st.subheader("📋 Mínimos de la SRT")
         
         if not st.session_state.data_manager.pisos_data.empty:
             df_pisos = st.session_state.data_manager.pisos_data.copy()
+            
+            # Invertir orden para mostrar más recientes arriba
+            df_pisos = df_pisos.iloc[::-1].reset_index(drop=True)
             
             # Formatear fechas
             df_pisos['desde'] = df_pisos['desde'].apply(lambda x: x.strftime('%d/%m/%Y') if isinstance(x, date) else str(x))
@@ -1137,7 +1036,7 @@ De la liquidación practicada, traslado a las partes por el plazo de cinco (5) d
         else:
             st.warning("No hay datos de pisos disponibles")
     
-    with tab5:
+    with tab6:
         st.subheader("ℹ️ Información del Sistema")
         
         info_tab1, info_tab2, info_tab3 = st.tabs(["Fórmulas", "Fuentes", "Marco Legal"])
@@ -1214,365 +1113,6 @@ De la liquidación practicada, traslado a las partes por el plazo de cinco (5) d
             - Actualización de prestaciones según RIPTE
             - Metodología de aplicación del coeficiente
             """)
-    with tab6:
-        st.subheader("🖨️ Generar PDF del Expediente")
-        
-        st.markdown("### 📋 Datos de Carátula")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            caratula_expediente = st.text_input(
-                "Número de Expediente",
-                placeholder="Ej: 12345/2023",
-                key="pdf_expediente"
-            )
-            
-            caratula_actor = st.text_input(
-                "Actor/a",
-                placeholder="Apellido, Nombre",
-                key="pdf_actor"
-            )
-            
-            caratula_demandado = st.text_input(
-                "Demandado/a",
-                placeholder="Nombre de la empresa/ART",
-                key="pdf_demandado"
-            )
-        
-        with col2:
-            caratula_juzgado = st.text_input(
-                "Tribunal",
-                value="Tribunal de Trabajo",
-                key="pdf_juzgado"
-            )
-            
-            caratula_secretaria = st.text_input(
-                "Secretaría",
-                value="Unica",
-                placeholder="Ej: Secretaría Nro. 1",
-                key="pdf_secretaria"
-            )
-            
-            caratula_fecha = st.date_input(
-                "Fecha del informe",
-                value=date.today(),
-                format="DD/MM/YYYY",
-                key="pdf_fecha"
-            )
-        
-        st.markdown("---")
-        
-        if st.button("📄 GENERAR VISTA PREVIA PARA IMPRIMIR", use_container_width=True, type="primary", key="generar_pdf"):
-            if not caratula_expediente or not caratula_actor:
-                st.error("⚠️ Por favor complete al menos el Número de Expediente y el Actor/a")
-            else:
-                # Determinar método más favorable
-                if results.total_ripte_3 >= results.total_tasa_activa:
-                    metodo_favorable = "RIPTE + 3%"
-                    monto_favorable = results.total_ripte_3
-                else:
-                    metodo_favorable = "Tasa Activa BNA"
-                    monto_favorable = results.total_tasa_activa
-                
-                # Calcular tasas judiciales para incluir en el PDF
-                tasa_justicia = monto_favorable * 0.022
-                sobretasa_caja = tasa_justicia * 0.10
-                total_final_pdf = monto_favorable + tasa_justicia + sobretasa_caja
-                
-                mes_pmi = get_mes_nombre(input_data.pmi_date.month)
-                anio_pmi = input_data.pmi_date.year
-                mes_final = get_mes_nombre(input_data.final_date.month)
-                anio_final = input_data.final_date.year
-                pct_ripte = (results.ripte_coef - 1) * 100
-                
-                # Generar HTML para imprimir
-                html_content = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <title>Cálculo Indemnización - {caratula_expediente}</title>
-                    <style>
-                        @page {{
-                            size: A4;
-                            margin: 2cm;
-                            }}
-                        @media print {{
-                            body {{
-                                width: 21cm;
-                                min-height: 29.7cm;
-                            }}
-                            .no-print {{
-                                display: none;
-                            }}
-                        }}
-                        body {{
-                            font-family: Arial, sans-serif;
-                            line-height: 1.6;
-                            color: #333;
-                            max-width: 21cm;
-                            margin: 0 auto;
-                            padding: 20px;
-                            background: white;
-                        }}
-                        .header {{
-                            text-align: center;
-                            margin-bottom: 30px;
-                            border-bottom: 3px solid #2E86AB;
-                            padding-bottom: 20px;
-                        }}
-                        .header h1 {{
-                            color: #2E86AB;
-                            margin: 0;
-                            font-size: 18px;
-                        }}
-                        .header h2 {{
-                            color: #666;
-                            margin: 5px 0;
-                            font-size: 14px;
-                            font-weight: normal;
-                        }}
-                        .caratula {{
-                            background: #f8f9fa;
-                            padding: 20px;
-                            margin-bottom: 30px;
-                            border-left: 4px solid #2E86AB;
-                        }}
-                        .caratula-row {{
-                            margin-bottom: 8px;
-                        }}
-                        .caratula-label {{
-                            font-weight: bold;
-                            display: inline-block;
-                            width: 150px;
-                        }}
-                        h3 {{
-                            color: #2E86AB;
-                            border-bottom: 2px solid #2E86AB;
-                            padding-bottom: 8px;
-                            margin-top: 30px;
-                            font-size: 14px;
-                        }}
-                        table {{
-                            width: 100%;
-                            border-collapse: collapse;
-                            margin: 20px 0;
-                        }}
-                        th, td {{
-                            padding: 10px;
-                            text-align: left;
-                            border: 1px solid #ddd;
-                        }}
-                        th {{
-                            background-color: #2E86AB;
-                            color: white;
-                            font-weight: bold;
-                        }}
-                        .highlight {{
-                            background-color: #E8F5E8;
-                            font-weight: bold;
-                        }}
-                        .amount {{
-                            text-align: right;
-                        }}
-                        .formula-box {{
-                            background: #e7f3ff;
-                            border: 1px solid #b3d9ff;
-                            padding: 15px;
-                            margin: 20px 0;
-                            border-radius: 5px;
-                        }}
-                        .footer {{
-                            margin-top: 50px;
-                            text-align: center;
-                            font-size: 11px;
-                            color: #666;
-                            border-top: 1px solid #ddd;
-                            padding-top: 20px;
-                        }}
-                        .section {{
-                            page-break-inside: avoid;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>JUDICIAL</h1>
-                        <h2>{caratula_juzgado}</h2>
-                    </div>
-                    
-                    <div class="caratula">
-                        <div class="caratula-row">
-                            <span class="caratula-label">Expediente:</span>
-                            <span>{caratula_expediente}</span>
-                        </div>
-                        <div class="caratula-row">
-                            <span class="caratula-label">Actor/a:</span>
-                            <span>{caratula_actor}</span>
-                        </div>
-                        {f'<div class="caratula-row"><span class="caratula-label">Demandado/a:</span><span>{caratula_demandado}</span></div>' if caratula_demandado else ''}
-                        <div class="caratula-row">
-                            <span class="caratula-label">Fecha:</span>
-                            <span>{caratula_fecha.strftime('%d/%m/%Y')}</span>
-                        </div>
-                    </div>
-                    
-                    <h1 style="text-align: center; color: #2E86AB;">CÁLCULO DE INDEMNIZACIÓN - LEY 24.557</h1>
-                    
-                    <div class="section">
-                        <h3>📋 DATOS DEL CASO</h3>
-                        <table>
-                            <tr>
-                                <th>Concepto</th>
-                                <th style="text-align: right;">Valor</th>
-                            </tr>
-                            <tr>
-                                <td>Fecha del Siniestro (PMI)</td>
-                                <td class="amount">{input_data.pmi_date.strftime('%d/%m/%Y')}</td>
-                            </tr>
-                            <tr>
-                                <td>Fecha de Cálculo</td>
-                                <td class="amount">{input_data.final_date.strftime('%d/%m/%Y')}</td>
-                            </tr>
-                            <tr>
-                                <td>Ingreso Base Mensual (IBM)</td>
-                                <td class="amount">{NumberUtils.format_money(input_data.ibm)}</td>
-                            </tr>
-                            <tr>
-                                <td>Edad del Trabajador</td>
-                                <td class="amount">{input_data.edad} años</td>
-                            </tr>
-                            <tr>
-                                <td>Porcentaje de Incapacidad</td>
-                                <td class="amount">{input_data.incapacidad_pct}%</td>
-                            </tr>
-                            <tr>
-                                <td>20% Art. 3 Ley 26.773</td>
-                                <td class="amount">{'Sí' if input_data.incluir_20_pct else 'No'}</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>💰 RESULTADOS DEL CÁLCULO</h3>
-                        <table>
-                            <tr>
-                                <th>Concepto</th>
-                                <th style="text-align: right;">Monto</th>
-                            </tr>
-                            <tr>
-                                <td>Capital Base (Fórmula)</td>
-                                <td class="amount">{NumberUtils.format_money(results.capital_formula)}</td>
-                            </tr>
-                            <tr>
-                                <td>{results.piso_info}</td>
-                                <td class="amount">{NumberUtils.format_money(results.piso_proporcional) if results.piso_aplicado else '-'}</td>
-                            </tr>
-                            <tr>
-                                <td>20% Art. 3 Ley 26.773</td>
-                                <td class="amount">{NumberUtils.format_money(results.adicional_20_pct) if results.adicional_20_pct > 0 else '-'}</td>
-                            </tr>
-                            <tr class="highlight">
-                                <td><strong>CAPITAL BASE TOTAL</strong></td>
-                                <td class="amount"><strong>{NumberUtils.format_money(results.capital_base)}</strong></td>
-                            </tr>
-                            <tr>
-                                <td>Actualización RIPTE + 3%</td>
-                                <td class="amount">{NumberUtils.format_money(results.total_ripte_3)}</td>
-                            </tr>
-                            <tr>
-                                <td>Actualización Tasa Activa BNA</td>
-                                <td class="amount">{NumberUtils.format_money(results.total_tasa_activa)}</td>
-                            </tr>
-                            <tr class="highlight">
-                                <td><strong>Método más favorable: {metodo_favorable}</strong></td>
-                                <td class="amount"><strong>{NumberUtils.format_money(monto_favorable)}</strong></td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>📊 DETALLE ACTUALIZACIÓN RIPTE</h3>
-                        <div class="formula-box">
-                            <p><strong>RIPTE {mes_pmi}/{anio_pmi}:</strong> {results.ripte_pmi:,.2f}</p>
-                            <p><strong>RIPTE - ultimo indice al mes de {mes_final}/{anio_final}:</strong> {results.ripte_final:,.2f}</p>
-                            <p><strong>Coeficiente:</strong> {results.ripte_coef:.2f} ({pct_ripte:.0f}%)</p>
-                            <p><strong>Capital actualizado RIPTE:</strong> {NumberUtils.format_money(results.ripte_actualizado)}</p>
-                            <p><strong>Interés puro 3% anual:</strong> {NumberUtils.format_money(results.interes_puro_3_pct)}</p>
-                            <p style="font-size: 16px; margin-top: 10px;"><strong>TOTAL RIPTE + 3%: {NumberUtils.format_money(results.total_ripte_3)}</strong></p>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>📈 DETALLE ACTUALIZACIÓN TASA ACTIVA</h3>
-                        <div class="formula-box">
-                            <p><strong>Tasa Activa BNA acumulada:</strong> {NumberUtils.format_percentage(results.tasa_activa_pct)}</p>
-                            <p style="font-size: 16px; margin-top: 10px;"><strong>TOTAL TASA ACTIVA: {NumberUtils.format_money(results.total_tasa_activa)}</strong></p>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>📉 INFLACIÓN (REFERENCIA)</h3>
-                        <p><strong>Inflación acumulada del período (IPC):</strong> {NumberUtils.format_percentage(results.inflacion_acum_pct)}</p>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>🧮 FÓRMULA APLICADA</h3>
-                        <div class="formula-box">
-                            <p>IBM ({NumberUtils.format_money(input_data.ibm)}) × 53 × 65/edad({input_data.edad}) × Incapacidad ({input_data.incapacidad_pct}%)</p>
-                            <p><strong>Capital calculado:</strong> {NumberUtils.format_money(results.capital_formula)}</p>
-                            <p style="margin-top: 10px;">{results.piso_info}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>💼 LIQUIDACIÓN JUDICIAL</h3>
-                        <table>
-                            <tr>
-                                <td>Capital actualizado ({metodo_favorable})</td>
-                                <td class="amount">{NumberUtils.format_money(monto_favorable)}</td>
-                            </tr>
-                            <tr>
-                                <td>Tasa de Justicia (2,2%)</td>
-                                <td class="amount">{NumberUtils.format_money(tasa_justicia)}</td>
-                            </tr>
-                            <tr>
-                                <td>Sobretasa Contribución Caja de Abogados (10%)</td>
-                                <td class="amount">{NumberUtils.format_money(sobretasa_caja)}</td>
-                            </tr>
-                            <tr class="highlight">
-                                <td><strong>TOTAL FINAL</strong></td>
-                                <td class="amount"><strong>{NumberUtils.format_money(total_final_pdf)}</strong></td>
-                            </tr>
-                        </table>
-                        <p style="text-align: center; margin-top: 20px;"><strong>{numero_a_letras(total_final_pdf)}</strong></p>
-                    </div>
-                    
-                    <div class="footer">
-                        <p><em>Documento generado por Calculadora Indemnizaciones LRT</em></p>
-                        <p><em>{caratula_juzgado}</em></p>
-                        <p><em>Fecha de generación: {date.today().strftime('%d/%m/%Y')}</em></p>
-                    </div>
-                </body>
-                </html>
-                """
-                
-                st.success("✅ Vista previa generada exitosamente")
-                st.info("💡 Presione Ctrl+P (o Cmd+P en Mac) en la vista previa para guardar como PDF")
-                
-                # Mostrar el HTML en un componente expandible
-                with st.expander("👁️ Ver vista previa del documento", expanded=True):
-                    st.components.v1.html(html_content, height=800, scrolling=True)
-                
-                # Botón para abrir en nueva ventana
-                html_b64 = base64.b64encode(html_content.encode()).decode()
-                href = f'<a href="data:text/html;base64,{html_b64}" download="Calculo_{caratula_expediente.replace("/", "-")}.html" target="_blank"><button style="background-color:#2E86AB; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📄 ABRIR EN NUEVA VENTANA PARA IMPRIMIR</button></a>'
-                st.markdown(href, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.info("💡 **Instrucciones:** Después de generar la vista previa, abra en nueva ventana y presione Ctrl+P (o Cmd+P en Mac) para guardar como PDF")
-
 else:
     # Mostrar mensaje inicial
     st.info("👈 Complete los datos en el panel lateral y presione CALCULAR para obtener los resultados")
@@ -1606,6 +1146,11 @@ else:
         - Tabla de mínimos SRT
         - Generación de PDF para imprimir
         """)
+
+# Mostrar últimos datos disponibles
+st.markdown("---")
+from utils.info_datasets import mostrar_ultimos_datos_completo
+mostrar_ultimos_datos_completo()
 
 # Footer
 st.markdown("---")
