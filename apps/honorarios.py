@@ -9,43 +9,12 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 from utils.data_loader import get_ultimo_dato
+from utils.navegacion import mostrar_sidebar_navegacion
+from utils.info_datasets import mostrar_ultimos_datos
+from utils.formatters import formato_moneda
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Calculadora de Honorarios",
-    page_icon="⚖️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# CSS personalizado
-st.markdown("""
-<style>
-    button[kind="header"], footer, 
-    [data-testid="stHeader"] svg[viewBox="0 0 16 16"] {
-        display: none !important;
-    }
-    .stNumberInput label {font-size: 12px !important;}
-    .stCheckbox label {font-size: 12px !important;}
-    
-    /* Línea vertical separadora entre columnas */
-    [data-testid="column"]:first-child {
-        border-right: 2px solid #e0e0e0;
-        padding-right: 20px !important;
-    }
-    [data-testid="column"]:last-child {
-        padding-left: 20px !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Función para formatear moneda
-def formato_moneda(valor):
-    """Formatea números como moneda argentina"""
-    try:
-        return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except:
-        return "$ 0,00"
+# Sidebar de navegación
+mostrar_sidebar_navegacion('honorarios')
 
 # Cargar dataset de JUS
 @st.cache_data
@@ -500,7 +469,9 @@ with tab2:
             - **TOTAL GENERAL: {formato_moneda(total_usado)} ({pct_usado:.2f}%)**
             - **REMANENTE: {formato_moneda(limite_25 - total_usado)} ({(25.0 - pct_usado):.2f}%)**
             """)
-
+st.markdown("---")
+from utils.info_datasets import mostrar_ultimos_datos_completo
+mostrar_ultimos_datos_completo()
 # Footer
 st.markdown("---")
 st.caption("**CALCULADORA DE HONORARIOS PROFESIONALES** | Sistema de Regulación Legal")
